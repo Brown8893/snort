@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -43,7 +43,10 @@ typedef enum
     APPINFO_FLAG_IGNORE =  (1<<8),
     APPINFO_FLAG_SSL_SQUELCH =  (1<<9),
     APPINFO_FLAG_PERSISTENT =  (1<<10),
-    APPINFO_FLAG_TP_CLIENT = (1<<11)
+    APPINFO_FLAG_TP_CLIENT = (1<<11),
+    APPINFO_FLAG_DEFER_PAYLOAD =  (1<<12),
+    APPINFO_FLAG_SEARCH_ENGINE =  (1<<13),
+    APPINFO_FLAG_SUPPORTED_SEARCH = (1<<14)
 } tAppInfoFlags;
 
 struct _AppInfoTableEntry
@@ -64,7 +67,7 @@ typedef struct _AppInfoTableEntry AppInfoTableEntry;
 
 void appInfoTableInit(const char *path, tAppIdConfig* pConfig);
 void appInfoTableFini(tAppIdConfig *pConfig);
-AppInfoTableEntry* appInfoEntryGet(tAppId appId, tAppIdConfig *pConfig);
+AppInfoTableEntry* appInfoEntryGet(tAppId appId, const tAppIdConfig *pConfig);
 AppInfoTableEntry* appInfoEntryCreate(const char *appName, tAppIdConfig *pConfig);
 tAppId appGetSnortIdFromAppId(tAppId appId);
 void AppIdDumpStats(int exit_flag);
@@ -73,21 +76,21 @@ void appInfoSetActive(tAppId appId, bool active);
 const char * appGetAppName(int32_t appId);
 int32_t appGetAppId(const char *appName);
 
-static inline void appInfoEntryFlagSet (tAppId appId, unsigned flags, tAppIdConfig *pConfig)
+static inline void appInfoEntryFlagSet (tAppId appId, unsigned flags, const tAppIdConfig *pConfig)
 {
     AppInfoTableEntry* entry = appInfoEntryGet(appId, pConfig);
     if (entry)
         entry->flags |= flags;
 }
 
-static inline void appInfoEntryFlagClear (tAppId appId, unsigned flags, tAppIdConfig *pConfig)
+static inline void appInfoEntryFlagClear (tAppId appId, unsigned flags, const tAppIdConfig *pConfig)
 {
     AppInfoTableEntry* entry = appInfoEntryGet(appId, pConfig);
     if (entry)
         entry->flags &= (~flags);
 }
 
-static inline unsigned appInfoEntryFlagGet (tAppId app_id, unsigned flags, tAppIdConfig *pConfig)
+static inline unsigned appInfoEntryFlagGet (tAppId app_id, unsigned flags, const tAppIdConfig *pConfig)
 {
     AppInfoTableEntry* entry = appInfoEntryGet(app_id, pConfig);
     if (entry)
@@ -95,14 +98,14 @@ static inline unsigned appInfoEntryFlagGet (tAppId app_id, unsigned flags, tAppI
     return 0;
 }
 
-static inline void appInfoEntryPrioritySet (tAppId appId, unsigned priority, tAppIdConfig *pConfig)
+static inline void appInfoEntryPrioritySet (tAppId appId, unsigned priority, const tAppIdConfig *pConfig)
 {
     AppInfoTableEntry* entry = appInfoEntryGet(appId, pConfig);
     if (entry)
         entry->priority |= priority;
 }
 
-static inline unsigned appInfoEntryPriorityGet (tAppId app_id, tAppIdConfig *pConfig)
+static inline unsigned appInfoEntryPriorityGet (tAppId app_id, const tAppIdConfig *pConfig)
 {
     AppInfoTableEntry* entry = appInfoEntryGet(app_id, pConfig);
     if (entry)

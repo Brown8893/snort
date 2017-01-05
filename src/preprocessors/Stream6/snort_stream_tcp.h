@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2004-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -95,5 +95,10 @@ void StreamPostConfigTcp(struct _SnortConfig *sc, void*);
 
 void registerPortForReassembly( char *network, uint16_t port, int reassembly_direction );
 void unregisterPortForReassembly( char *network, uint16_t port, int reassembly_direction );
-
+Packet* getWirePacketTcp();
+uint8_t getFlushPolicyDirTcp();
+bool StreamIsSessionHttp2Tcp( SessionControlBlock *scb );
+void StreamSetSessionHttp2Tcp( SessionControlBlock *scb );
+bool StreamIsSessionHttp2UpgTcp( SessionControlBlock *scb );
+void StreamSetSessionHttp2UpgTcp( SessionControlBlock *scb );
 #endif /* STREAM_TCP_H_ */

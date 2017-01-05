@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -42,7 +42,6 @@
 #include "client_app_api.h"
 #include "client_app_base.h"
 
-#include "client_app_smtp.h"
 #include "client_app_msn.h"
 #include "client_app_aim.h"
 #include "client_app_ym.h"
@@ -115,11 +114,10 @@ extern tRNAClientAppModule tns_client_mod;
 extern tRNAClientAppModule vnc_client_mod;
 extern tRNAClientAppModule pattern_udp_client_mod;
 extern tRNAClientAppModule pattern_tcp_client_mod;
-
+extern tRNAClientAppModule http_client_mod;
 
 static tRNAClientAppModule *static_client_list[] =
 {
-    &smtp_client_mod,
     &msn_client_mod,
     &aim_client_mod,
     &ym_client_mod,
@@ -135,7 +133,8 @@ static tRNAClientAppModule *static_client_list[] =
     &pattern_udp_client_mod,
     &pattern_tcp_client_mod,
     &dns_udp_client_mod,
-    &dns_tcp_client_mod
+    &dns_tcp_client_mod,
+    &http_client_mod
 };
 
 /*static const char * const MODULE_NAME = "ClientApp"; */
@@ -800,7 +799,7 @@ void AppIdAddClientApp(tAppIdData *flowp, tAppId service_id, tAppId id, const ch
         }
     }
 
-    setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
+    setAppIdFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
     flowp->clientServiceAppId = service_id;
     flowp->clientAppId = id;
     checkSandboxDetection(id);
@@ -965,24 +964,6 @@ static void ClientAppID(SFSnortPacket *p, const int dir, tAppIdData *flowp, cons
     }
     FreeClientPatternList(&match_list);
 
-    if (sflist_count(flowp->candidate_client_list) == 0)
-    {
-        client = NULL;
-        switch (p->dst_port)
-        {
-            case 465:
-                if (getAppIdExtFlag(flowp, APPID_SESSION_DECRYPTED))
-                    client = &smtp_client_mod;
-                break;
-            default:
-                break;
-        }
-        if (client != NULL)
-        {
-            sflist_add_tail(flowp->candidate_client_list, (void*)client);
-            flowp->num_candidate_clients_tried++;
-        }
-    }
 }
 
 int AppIdDiscoverClientApp(SFSnortPacket *p, int direction, tAppIdData *rnaData, const tAppIdConfig *pConfig)
@@ -993,10 +974,10 @@ int AppIdDiscoverClientApp(SFSnortPacket *p, int direction, tAppIdData *rnaData,
     if (direction == APP_ID_FROM_INITIATOR)
     {
         /* get out if we've already tried to validate a client app */
-        if (!getAppIdExtFlag(rnaData, APPID_SESSION_CLIENT_DETECTED))
+        if (!getAppIdFlag(rnaData, APPID_SESSION_CLIENT_DETECTED))
             ClientAppID(p, direction, rnaData, pConfig);
     }
-    else if (rnaData->rnaServiceState != RNA_STATE_STATEFUL && getAppIdExtFlag(rnaData, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS))
+    else if (rnaData->rnaServiceState != RNA_STATE_STATEFUL && getAppIdFlag(rnaData, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS))
         ClientAppID(p, direction, rnaData, pConfig);
 
     return APPID_SESSION_SUCCESS;

@@ -1,6 +1,6 @@
 /* $Id$ */
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2002-2013 Sourcefire, Inc.
 ** Copyright (C) 1998-2002 Martin Roesch <roesch@sourcefire.com>
 ** Copyright (C) 2000,2001 Andrew R. Baker <andrewb@uab.edu>
@@ -109,6 +109,7 @@
 #ifdef TARGET_BASED
 # include "sftarget_reader.h"
 #endif
+
 
 /* Macros *********************************************************************/
 #define ENABLE_ALL_RULES    1
@@ -718,6 +719,7 @@ static const ConfigFunc config_opts[] =
     { CONFIG_OPT__NAP_POLICY_MODE, 1, 1, 0, ConfigNapPolicyMode },
     { CONFIG_OPT__POLICY_VERSION , 1, 0, 0, ConfigPolicyVersion },
     { CONFIG_OPT__PROTECTED_CONTENT , 1, 0, 0, ConfigProtectedContent },
+    { CONFIG_OPT__FTPDATA_TRIM_THRESHOLD, 1, 1, 0, ConfigFTPDataTrimThreshold},
 #ifdef PPM_MGR
     { CONFIG_OPT__PPM, 1, 0, 1, ConfigPPM },
 #endif
@@ -751,6 +753,10 @@ static const ConfigFunc config_opts[] =
 #endif
     { CONFIG_OPT__MAX_IP6_EXTENSIONS, 1, 1, 1, ConfigMaxIP6Extensions },
     { CONFIG_OPT__DISABLE_REPLACE, 0, 1, 0, ConfigDisableReplace },
+#ifdef DUMP_BUFFER
+    { CONFIG_OPT__BUFFER_DUMP, 1, 1, 1, ConfigBufferDump },
+    { CONFIG_OPT__BUFFER_DUMP_ALERT, 1, 1, 1, ConfigBufferDump },
+#endif
     { NULL, 0, 0, 0, NULL }   /* Marks end of array */
 };
 
@@ -8392,6 +8398,27 @@ void ConfigProtectedContent(SnortConfig *sc, char *args)
 
     mSplitFree(&toks, num_toks);
 }
+
+void ConfigFTPDataTrimThreshold(SnortConfig *sc, char *args)
+{
+    long int value;
+    char *endptr;
+
+    if ((sc == NULL) || (args == NULL))
+        return;
+
+    value = strtol(args, &endptr, 0);
+
+    if ((errno == ERANGE) || (*endptr != '\0') || (value < 1))
+    {
+        ParseError("Invalid argument to 'ftp_data_trim_threshold' configuration: %s.  "
+                   "Must be a positive integer.", args);
+    }
+
+    sc->ftp_data_trim_threshold = (uint32_t)value;
+    return;
+}
+
 #ifdef PPM_MGR
 /*
  * config ppm: feature, feature, feature,..
@@ -9290,6 +9317,30 @@ void ConfigDisableReplace(SnortConfig *sc, char *args)
         return;
     sc->disable_replace_opt = 1;
 }
+
+#ifdef DUMP_BUFFER
+void ConfigBufferDump(SnortConfig *sc, char *args)
+{
+    if ( !sc )
+        return;
+
+    sc->no_log = 0;
+
+    if (!args)
+        return;
+
+    if ( !sc->buffer_dump_file )
+    {
+        sc->buffer_dump_file = StringVector_New();
+
+        if ( !sc->buffer_dump_file )
+            ParseError("can't allocate memory for buffer_dump_file '%s'.", args);
+    }
+    if ( !StringVector_Add(sc->buffer_dump_file, args) )
+        ParseError("can't allocate memory for buffer_dump '%s'.", args);
+}
+#endif
+
 /****************************************************************************
  *
  * Function: ParseRule()

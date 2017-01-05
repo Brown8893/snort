@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2008-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -45,6 +45,10 @@
 #include "sf_dynamic_preprocessor.h"
 #include "file_api.h"
 #include "dce2_smb2.h"
+
+#ifdef DUMP_BUFFER
+#include "dcerpc2_buffer_dump.h"
+#endif
 
 #ifndef WIN32
 #include <arpa/inet.h>  /* for ntohl */
@@ -2258,6 +2262,9 @@ static inline void DCE2_Smb1Process(DCE2_SmbSsnData *ssd)
     DCE2_Buffer **seg_buf = DCE2_SmbGetSegBuffer(ssd);
     DCE2_SmbDataState *data_state = DCE2_SmbGetDataState(ssd);
 
+#ifdef DUMP_BUFFER
+    dumpBuffer(DCERPC_SMB1_DUMP,data_ptr,data_len);
+#endif
     DEBUG_WRAP(DCE2_DebugMsg(DCE2_DEBUG__SMB, "Processing SMB packet.\n"));
     dce2_stats.smb_pkts++;
 
@@ -2338,6 +2345,7 @@ static inline void DCE2_Smb1Process(DCE2_SmbSsnData *ssd)
                 }
 
                 nb_len = NbssLen(nb_hdr);
+
                 DEBUG_WRAP(DCE2_DebugMsg(DCE2_DEBUG__SMB,
                             "NetBIOS PDU length: %u\n", nb_len));
 

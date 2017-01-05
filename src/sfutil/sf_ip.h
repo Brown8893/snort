@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 1998-2013 Sourcefire, Inc.
 ** Adam Keeton
 ** Kevin Liu <kliu@sourcefire.com>
@@ -38,6 +38,10 @@
 #include <arpa/inet.h>
 #endif
 
+#ifdef WIN32
+#include <ws2tcpip.h>
+#endif
+
 #include "snort_debug.h" /* for inline definition */
 
 /* define SFIP_ROBUST to check pointers passed into the sfip libs.
@@ -68,6 +72,7 @@
 
 #endif
 
+#ifndef WIN32
 #if !defined(s6_addr8)
 #define s6_addr8  __u6_addr.__u6_addr8
 #endif
@@ -78,6 +83,10 @@
 #define s6_addr32 __u6_addr.__u6_addr32
 #endif
 
+#ifdef _WIN32
+#pragma pack(push,1)
+#endif
+
 struct _sfaddr
 {
     struct in6_addr ip;
@@ -85,7 +94,61 @@ struct _sfaddr
 #   define ia8  ip.s6_addr
 #   define ia16 ip.s6_addr16
 #   define ia32 ip.s6_addr32
+#ifdef _WIN32
+};
+#pragma pack(pop)
+#else
 } __attribute__((__packed__));
+#endif
+typedef struct _sfaddr sfaddr_t;
+
+#ifdef _WIN32
+#pragma pack(push,1)
+#endif
+
+struct _ip {
+    sfaddr_t addr;
+    uint16_t bits;
+#   define ip8  addr.ip.s6_addr
+#   define ip16 addr.ip.s6_addr16
+#   define ip32 addr.ip.s6_addr32
+#   define ip_family addr.family
+#ifdef _WIN32
+};
+#pragma pack(pop)
+#else
+} __attribute__((__packed__));
+#endif
+
+typedef struct _ip sfcidr_t;
+
+#else // WIN32 Build
+#if !defined(s6_addr8)
+#define s6_addr8  u.u6_addr8
+#endif
+#if !defined(s6_addr16)
+#define s6_addr16 u.u6_addr16
+#endif
+#if !defined(s6_addr32)
+#define s6_addr32 u.u6_addr32
+#endif
+
+struct sf_in6_addr {
+    union {
+        uint8_t u6_addr8[16];
+        uint16_t u6_addr16[8];
+        uint32_t u6_addr32[4];
+    } in6_u;
+};
+
+#pragma pack(push,1)
+struct _sfaddr {
+    struct in6_addr ip;
+    uint16_t family;
+#   define ia8  ip.s6_addr
+#   define ia16 ip.s6_addr16
+#   define ia32 ip.s6_addr32
+};
 typedef struct _sfaddr sfaddr_t;
 
 struct _ip {
@@ -95,8 +158,11 @@ struct _ip {
 #   define ip16 addr.ip.s6_addr16
 #   define ip32 addr.ip.s6_addr32
 #   define ip_family addr.family
-} __attribute__((__packed__));
+};
 typedef struct _ip sfcidr_t;
+#pragma pack(pop)
+
+#endif // WIN32
 
 typedef enum _return_values {
     SFIP_SUCCESS=0,

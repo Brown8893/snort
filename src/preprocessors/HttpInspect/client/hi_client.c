@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2003-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -77,9 +77,9 @@
 #define HEADER_LENGTH__COOKIE 6
 #define HEADER_NAME__CONTENT_LENGTH "Content-length"
 #define HEADER_LENGTH__CONTENT_LENGTH 14
-#define HEADER_NAME__XFF HI_UI_CONFIG_XFF_FIELD_NAME
+#define HEADER_NAME__XFF HTTP_XFF_FIELD_X_FORWARDED_FOR
 #define HEADER_LENGTH__XFF (sizeof(HEADER_NAME__XFF)-1)
-#define HEADER_NAME__TRUE_IP HI_UI_CONFIG_TCI_FIELD_NAME
+#define HEADER_NAME__TRUE_IP HTTP_XFF_FIELD_TRUE_CLIENT_IP
 #define HEADER_LENGTH__TRUE_IP (sizeof(HEADER_NAME__TRUE_IP)-1)
 #define HEADER_NAME__HOSTNAME "Host"
 #define HEADER_LENGTH__HOSTNAME 4
@@ -170,13 +170,18 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
     uint32_t iDataLen = 0;
     uint32_t chunkBytesCopied = 0;
     uint8_t stateless_chunk_count = 0;
+    uint8_t iChunkLenState = CHUNK_LEN_DEFAULT;
+    bool iChunkRemainder = false;
 
     if(!start || !end)
         return HI_INVALID_ARG;
 
     ptr = start;
 
-    if(chunk_remainder)
+    if (hsd)
+        iChunkLenState = hsd->resp_state.chunk_len_state;
+
+    if(chunk_remainder && iChunkLenState == CHUNK_LEN_DEFAULT)
     {
         iDataLen = end - ptr;
 
@@ -187,6 +192,7 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
                 if(updated_chunk_remainder)
                     *updated_chunk_remainder = chunk_remainder - iDataLen ;
                 chunk_remainder = iDataLen;
+                iChunkRemainder = true;
             }
         }
         else
@@ -196,6 +202,7 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
                 if(updated_chunk_remainder)
                     *updated_chunk_remainder = chunk_remainder - max_size ;
                 chunk_remainder = max_size;
+                iChunkRemainder = true;
             }
         }
 
@@ -211,6 +218,11 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
             }
             ptr = jump_ptr + 1;
         }
+    }
+    else if(iChunkLenState == CHUNK_LEN_INCOMPLETE)
+    {
+        /* Chunk length incompletely read previously, continue to read the remaining bytes */
+        iChunkLen = chunk_remainder;
     }
 
     while(hi_util_in_bounds(start, end, ptr))
@@ -288,10 +300,13 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
                 if(*ptr == '\n')
                     ptr++;
 
+                iChunkLenState = CHUNK_LEN_DEFAULT;
+
                 if(!hi_util_in_bounds(start, end, ptr))
                 {
                     if(updated_chunk_remainder)
                         *updated_chunk_remainder = iChunkLen;
+                    iChunkRemainder = true;
                     break;
                 }
 
@@ -301,6 +316,7 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
                 {
                     if(updated_chunk_remainder)
                         *updated_chunk_remainder = iChunkLen - iDataLen;
+                    iChunkRemainder = true;
                     iChunkLen = iDataLen;
                 }
 
@@ -355,6 +371,7 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
                 iCheckChunk = 1;
                 iChunkLen   = 0;
                 iChunkChars = 0;
+                iChunkLenState = CHUNK_LEN_DEFAULT;
             }
 
             ptr++;
@@ -367,7 +384,10 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
             {
                 if(*ptr == '\r')
                 {
-                    ptr++;
+                    while((hi_util_in_bounds(start, end, ptr)) && (*ptr == '\r'))
+                    {
+                        ptr++;
+                    }
 
                     if(!hi_util_in_bounds(start, end, ptr))
                         break;
@@ -385,6 +405,7 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
                     if(ptr == NULL)
                     {
                         ptr = end;
+                        iChunkLenState = CHUNK_LEN_DEFAULT;
                         break;
                     }
                     else
@@ -395,6 +416,7 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
                 iCheckChunk = 0;
                 iChunkLen   = 0;
                 iChunkChars = 0;
+                iChunkLenState = CHUNK_LEN_DEFAULT;
             }
             else
             {
@@ -412,18 +434,41 @@ int CheckChunkEncoding(HI_SESSION *Session, const u_char *start, const u_char *e
                     iCheckChunk = 0;
                     iChunkLen   = 0;
                     iChunkChars = 0;
+                    iChunkLenState = CHUNK_LEN_DEFAULT;
                 }
                 else
                 {
                     iChunkLen <<= 4;
                     iChunkLen |= (unsigned int)(hex_lookup[*ptr]);
                     iChunkChars++;
+                    /*
+                    ** Chunk length incompletely read i.e CRLF not found yet
+                    ** Storing the bytes of chunk length, read till now
+                    ** (to handle the split of chunk length itself across different packets)
+                    */
+                    iChunkLenState = CHUNK_LEN_INCOMPLETE;
+                    if(updated_chunk_remainder)
+                        *updated_chunk_remainder = iChunkLen;
                 }
             }
         }
 
         ptr++;
     }
+
+    /*
+    ** If we neither have Chunk data split across packets (or)
+    ** Chunk length itself split across packets then clear
+    */
+    if(!( iChunkRemainder || (iChunkLenState == CHUNK_LEN_INCOMPLETE) ))
+    {
+        if(updated_chunk_remainder)
+            *updated_chunk_remainder = 0;
+    }
+
+    if (hsd)
+        hsd->resp_state.chunk_len_state = iChunkLenState;
+
     if (chunkPresent )
     {
         if(post_end)
@@ -2146,19 +2191,28 @@ const u_char *extract_http_hostname(HI_SESSION *Session, const u_char *p, const 
 
 const u_char *extract_http_content_length(HI_SESSION *Session,
         HTTPINSPECT_CONF *ServerConf, const u_char *p, const u_char *start,
-        const u_char *end, HEADER_PTR *header_ptr, HEADER_FIELD_PTR *header_field_ptr)
+        const u_char *end, HEADER_PTR *header_ptr, HEADER_FIELD_PTR *header_field_ptr, int iInspectMode)
 {
     int num_spaces = 0;
     const u_char *crlf;
     int space_present = 0;
     if (header_ptr->content_len.cont_len_start)
     {
-        if(hi_eo_generate_event(Session, HI_EO_CLIENT_MULTIPLE_CONTLEN))
+        if(iInspectMode == HI_SI_SERVER_MODE)
         {
-            hi_eo_client_event_log(Session, HI_EO_CLIENT_MULTIPLE_CONTLEN, NULL, NULL);
+            if(hi_eo_generate_event(Session, HI_EO_SERVER_MULTIPLE_CONTLEN))
+            {
+                hi_eo_server_event_log(Session, HI_EO_SERVER_MULTIPLE_CONTLEN, NULL, NULL);
+            }
+        }
+        else if(iInspectMode == HI_SI_CLIENT_MODE)
+        {
+            if(hi_eo_generate_event(Session, HI_EO_CLIENT_MULTIPLE_CONTLEN))
+            {
+                hi_eo_client_event_log(Session, HI_EO_CLIENT_MULTIPLE_CONTLEN, NULL, NULL);
+            }
         }
         header_ptr->header.uri_end = p;
-        header_ptr->content_len.len = 0;
         return p;
     }
     else
@@ -2374,7 +2428,7 @@ static inline bool IsXFFFieldName( HI_CLIENT_HDR_ARGS *hdrs_args,
     {
         /* If we run off the end of the active table, or table is truncated then
            we can stop.  We didn't locate a match. */
-        if( (i >= (HI_UI_CONFIG_MAX_XFF_FIELD_NAMES)) || (Field_Names[i] == NULL) )
+        if( (i >= (HTTP_MAX_XFF_FIELDS)) || (Field_Names[i] == NULL) )
             break;
 
         if( field_ptr == NULL )  // didn't start to match any entry
@@ -2454,7 +2508,7 @@ static inline const u_char *extractHeaderFieldValues(HI_SESSION *Session,
         else if ( IsHeaderFieldName(p, end, HEADER_NAME__CONTENT_LENGTH, HEADER_LENGTH__CONTENT_LENGTH) )
         {
             p = extract_http_content_length(Session, ServerConf, p, start,
-                    end, hdrs_args->hdr_ptr, hdrs_args->hdr_field_ptr );
+                    end, hdrs_args->hdr_ptr, hdrs_args->hdr_field_ptr,HI_SI_CLIENT_MODE);
         }
         else if ( IsHeaderFieldName(p, end, HEADER_NAME__CONTENT_TYPE, HEADER_LENGTH__CONTENT_TYPE) )
         {
@@ -2935,6 +2989,10 @@ int StatelessInspection(Packet *p, HI_SESSION *Session, HttpSessionData *hsd, in
     char sans_uri = 0;
     const unsigned char *data = p->data;
     int dsize = p->dsize;
+    bool http_post_hdr_flush = false;
+
+    if(stream_api->get_proto_flags(p->ssnptr) & PROTO_HTTP_PAF_FLUSH_POST_HDR)
+        http_post_hdr_flush = true;
 
     if ( ScPafEnabled() )
     {
@@ -3043,7 +3101,8 @@ int StatelessInspection(Packet *p, HI_SESSION *Session, HttpSessionData *hsd, in
      * just do a strcmp here and skip the characters below. */
     if(method_len == 4 && !strncasecmp("POST", (const char *)method_ptr.uri, 4))
     {
-        hi_stats.post++;
+        if(!http_post_hdr_flush)
+            hi_stats.post++;
         Client->request.method = HI_POST_METHOD;
     }
     else if(method_len == 3 && !strncasecmp("GET", (const char *)method_ptr.uri, 3))
@@ -3136,11 +3195,13 @@ int StatelessInspection(Packet *p, HI_SESSION *Session, HttpSessionData *hsd, in
             }
             else
             {
-                hi_stats.req_headers++;
+                if(!http_post_hdr_flush)
+                    hi_stats.req_headers++;
                 Client->request.header_norm = header_ptr.header.uri;
                 if (header_ptr.cookie.cookie)
                 {
-                    hi_stats.req_cookies++;
+                    if(!http_post_hdr_flush)
+                        hi_stats.req_cookies++;
                     Client->request.cookie.cookie = header_ptr.cookie.cookie;
                     Client->request.cookie.cookie_end = header_ptr.cookie.cookie_end;
                     Client->request.cookie.next = header_ptr.cookie.next;
@@ -3175,7 +3236,8 @@ int StatelessInspection(Packet *p, HI_SESSION *Session, HttpSessionData *hsd, in
                        Session, ServerConf, ptr, end, &post_ptr,
                        header_ptr.content_len.len, header_ptr.is_chunked, hsd )))
                 {
-                    hi_stats.post_params++;
+                    if(!http_post_hdr_flush)
+                        hi_stats.post_params++;
                     Client->request.post_raw = post_ptr.uri;
                     Client->request.post_raw_size = post_ptr.uri_end - post_ptr.uri;
                     Client->request.post_norm = post_ptr.norm;

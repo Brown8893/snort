@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -102,8 +102,23 @@ static inline bool compareServiceElements(const tRNAServiceElement *first, const
 
 static inline uint32_t AppIdServiceDetectionLevel(tAppIdData * session)
 {
-    if (getAppIdExtFlag(session, APPID_SESSION_DECRYPTED)) return 1;
+    if (getAppIdFlag(session, APPID_SESSION_DECRYPTED)) return 1;
     return 0;
+}
+
+static inline void PopulateExpectedFlow(tAppIdData* parent, tAppIdData* expected, uint64_t flags)
+{
+    setAppIdFlag(expected, flags |
+                 getAppIdFlag(parent,
+                              APPID_SESSION_RESPONDER_MONITORED |
+                              APPID_SESSION_INITIATOR_MONITORED |
+                              APPID_SESSION_SPECIAL_MONITORED |
+                              APPID_SESSION_RESPONDER_CHECKED |
+                              APPID_SESSION_INITIATOR_CHECKED |
+                              APPID_SESSION_DISCOVER_APP |
+                              APPID_SESSION_DISCOVER_USER));
+    expected->rnaServiceState = RNA_STATE_FINISHED;
+    expected->rnaClientState = RNA_STATE_FINISHED;
 }
 
 #endif /* __SERVICE_BASE_H__ */

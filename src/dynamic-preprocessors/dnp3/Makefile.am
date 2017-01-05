@@ -30,6 +30,13 @@ dnp3_roptions.h \
 dnp3_map.c \
 dnp3_map.h
 
+if BUILD_BUFFER_DUMP
+libsf_dnp3_preproc_la_SOURCES += \
+dnp3_buffer_dump.c \
+dnp3_buffer_dump.h
+endif
+
+
 EXTRA_DIST = \
 sf_dnp3.dsp
 

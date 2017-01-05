@@ -60,8 +60,16 @@ dce2_http.h \
 dce2_paf.c \
 dce2_paf.h
 
+if BUILD_BUFFER_DUMP
+libsf_dce2_preproc_la_SOURCES += \
+dcerpc2_buffer_dump.c \
+dcerpc2_buffer_dump.h
+endif
+
+
 EXTRA_DIST = \
 sf_dce2.dsp
+
 
 all-local: $(LTLIBRARIES)
 	$(MAKE) DESTDIR=`pwd`/../build install-dynamicpreprocessorLTLIBRARIES

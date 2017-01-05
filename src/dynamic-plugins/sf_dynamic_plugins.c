@@ -17,7 +17,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * Author: Steven Sturges
@@ -2103,7 +2103,7 @@ static char *dummyGetClientVersion(struct AppIdData *session)
     return NULL;
 }
 
-static unsigned dummyGetAppIdSessionAttribute(struct AppIdData *session, unsigned int flag)
+static uint64_t dummyGetAppIdSessionAttribute(struct AppIdData *session, uint64_t flag)
 {
     return 0;
 }
@@ -2122,7 +2122,12 @@ static short dummyGetServicePort(struct AppIdData *appIdData)
     return 0;
 }
 
-static sfaddr_t *dummyGetServiceIp(struct AppIdData *appIdData)
+static sfaddr_t *dummyIpFromAppIdData(struct AppIdData *appIdData)
+{
+    return NULL;
+}
+
+static struct in6_addr *dummyGetInitiatorIp(struct AppIdData *appIdData)
 {
     return NULL;
 }
@@ -2130,6 +2135,16 @@ static sfaddr_t *dummyGetServiceIp(struct AppIdData *appIdData)
 static char *dummyStringFromAppIdData(struct AppIdData *appIdData)
 {
     return NULL;
+}
+
+static char *dummyIndexedStringFromAppIdData(struct AppIdData *appIdData, HTTP_FIELD_ID fieldId)
+{
+    return NULL;
+}
+
+static void dummyFreeIndexedStringFromAppIdData(struct AppIdData *appIdData, HTTP_FIELD_ID fieldId)
+{
+    return;
 }
 
 static SEARCH_SUPPORT_TYPE dummySearchTypeFromAppIdData(struct AppIdData *appIdData)
@@ -2179,14 +2194,9 @@ static uint32_t dummyProduceHAState(void *lwssn, uint8_t *buf)
     return 0;
 }
 
-static uint32_t dummyConsumeHAState(void *lwssn, const uint8_t *buf, uint8_t length, uint8_t proto, sfaddr_t *ip)
+static uint32_t dummyConsumeHAState(void *lwssn, const uint8_t *buf, uint8_t length, uint8_t proto, struct in6_addr* ip, uint16_t initiatorPort)
 {
     return 0;
-}
-
-static void *dummyGetFirewallEarlySessionData(struct AppIdData *session)
-{
-    return NULL;
 }
 
 static struct AppIdData *dummyGetAppIdData(void *lwssn)
@@ -2251,7 +2261,8 @@ struct AppIdApi appIdApi = {
     dummyGetFlowType,       /* getFlowType */
     dummyGetServiceInfo,    /* getServiceInfo */
     dummyGetServicePort,    /* getServicePort */
-    dummyGetServiceIp,      /* getServiceIp */
+    dummyIpFromAppIdData,   /* getServiceIp */
+    dummyGetInitiatorIp,   /* getInitiatorIp */
 
     dummyStringFromAppIdData,    /* getHttpUserAgent */
     dummyStringFromAppIdData,    /* getHttpHost */
@@ -2271,6 +2282,8 @@ struct AppIdApi appIdApi = {
     dummyOffsetFromAppIdData,    /* getHttpCookieOffset */
     dummyOffsetFromAppIdData,    /* getHttpCookieEndOffset */
     dummySearchTypeFromAppIdData,       /* getHttpSearch */
+    dummyIpFromAppIdData,        /* getHttpXffAddr */
+
 
     dummyStringFromAppIdData,    /* getTlsHost */
 
@@ -2291,6 +2304,9 @@ struct AppIdApi appIdApi = {
     dummyGetDNSRecordType,      /* getDNSQueryType */
     dummyGetDNSResponseType,    /* getDNSQueryResponseType */
     dummyGetDNSTTL,             /* getDNSTTL */
+
+    dummyIndexedStringFromAppIdData,        /* getHttpNewField */
+    dummyFreeIndexedStringFromAppIdData,    /* freeHttpNewField */
 };
 #endif /* defined(FEAT_OPEN_APPID) */
 
@@ -2331,6 +2347,9 @@ int InitDynamicPreprocessors(void)
     preprocData.registerPreproc = &RegisterPreprocessor;
 #ifdef SNORT_RELOAD
     preprocData.getRelatedReloadData = GetRelatedReloadData;
+#endif
+#ifdef DUMP_BUFFER
+    preprocData.registerBufferTracer = &RegisterBufferTracer;
 #endif
     preprocData.addPreproc = &AddPreprocessor;
     preprocData.addPreprocAllPolicies = &AddPreprocessorAllPolicies;
@@ -2536,6 +2555,8 @@ int InitDynamicPreprocessors(void)
     preprocData.openDynamicLibrary = &openDynamicLibrary;
     preprocData.getSymbol = &getSymbol;
     preprocData.closeDynamicLibrary = &CloseDynamicLibrary;
+
+    preprocData.getHttpXffFields = &GetHttpXffFields;
 
 #if defined(FEAT_OPEN_APPID)
     preprocData.appIdApi = &appIdApi;

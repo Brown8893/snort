@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2008-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -115,7 +115,8 @@ static int  pruneFileCache(FileCache *fileCache, FileEntry *file)
     return pruned;
 }
 
-FileEntry *file_cache_get(FileCache *fileCache, void* p, uint64_t file_id)
+FileEntry *file_cache_get(FileCache *fileCache, void* p, uint64_t file_id,
+    bool can_create)
 {
     SFXHASH_NODE *hnode;
     FileKey fileKey;
@@ -141,20 +142,28 @@ FileEntry *file_cache_get(FileCache *fileCache, void* p, uint64_t file_id)
     sfaddr_copy_to_raw(&fileKey.sip, srcIP);
     fileKey.file_id = file_id;
 
-    hnode = sfxhash_get_node(fileCache->hashTable, &fileKey);
-
-    if (!hnode)
+    if (!can_create)
     {
-        /*No more file entries, free up some old ones*/
-        pruneFileCache(fileCache, NULL);
+        hnode = sfxhash_find_node(fileCache->hashTable, &fileKey);
+    }
+    else
+    {
 
-        /* Should have some freed nodes now */
         hnode = sfxhash_get_node(fileCache->hashTable, &fileKey);
 
-#ifdef DEBUG_MSGS
         if (!hnode)
-            LogMessage("%s(%d) Problem, no freed nodes\n", __FILE__, __LINE__);
+        {
+            /*No more file entries, free up some old ones*/
+            pruneFileCache(fileCache, NULL);
+
+            /* Should have some freed nodes now */
+            hnode = sfxhash_get_node(fileCache->hashTable, &fileKey);
+
+#ifdef DEBUG_MSGS
+            if (!hnode)
+                LogMessage("%s(%d) Problem, no freed nodes\n", __FILE__, __LINE__);
 #endif
+        }
     }
 
     if (hnode && hnode->data)
@@ -420,7 +429,7 @@ void *file_cache_update_entry (FileCache *fileCache, void* p, uint64_t file_id,
 {
     FileEntry *fileEntry;
 
-    fileEntry = file_cache_get(fileCache, p, file_id);
+    fileEntry = file_cache_get(fileCache, p, file_id, true);
 
     if (!fileEntry)
         return NULL;
@@ -447,6 +456,22 @@ void *file_cache_update_entry (FileCache *fileCache, void* p, uint64_t file_id,
     return fileEntry;
 }
 
+static inline void update_file_session(void *ssnptr, FileCache *fileCache,
+    uint64_t file_id, FileContext *context)
+{
+    FileSession *file_session;
+
+    if (!file_api->set_current_file_context(ssnptr, context))
+        return;
+
+    file_session = get_file_session (ssnptr);
+
+    if (!file_session->file_cache)
+        file_session->file_cache = fileCache;
+
+    file_session->file_id = file_id;
+}
+
 /*
  * Process file segment, do file segment reassemble if the file segment is
  * out of order. file_id is unique, used as a key to find the file entity.
@@ -460,7 +485,6 @@ int file_segment_process( FileCache *fileCache, void* p, uint64_t file_id,
 {
     FileEntry *fileEntry;
     int ret = 0;
-    FileSession *file_session;
     Packet *pkt = (Packet *)p;
     void *ssnptr = pkt->ssnptr;
 
@@ -469,7 +493,7 @@ int file_segment_process( FileCache *fileCache, void* p, uint64_t file_id,
         return 0;
     }
 
-    fileEntry = file_cache_get(fileCache, p, file_id);
+    fileEntry = file_cache_get(fileCache, p, file_id, true);
 
     if (fileEntry == NULL)
         return 0;
@@ -506,19 +530,11 @@ int file_segment_process( FileCache *fileCache, void* p, uint64_t file_id,
         }
     }
 
-    file_session = get_file_session (ssnptr);
-    if (file_session == NULL)
-        return 0;
-
-    if (!file_session->file_cache)
-        file_session->file_cache = fileCache;
-
-    file_session->file_id = file_id;
-
     /* Walk through the segments that can be flushed*/
     if (fileEntry->offset == offset)
     {
         /*Process the packet update the offset */
+        update_file_session(ssnptr, fileCache, file_id, fileEntry->context);
         ret = _process_one_file_segment(p, fileEntry, file_data, data_size, file_size);
         fileEntry->offset += data_size;
         if (!ret)
@@ -536,7 +552,7 @@ int file_segment_process( FileCache *fileCache, void* p, uint64_t file_id,
 
     if(ret && fileEntry->file_name_size)
     {
-        file_api->set_current_file_context(ssnptr, fileEntry->context);
+        update_file_session(ssnptr, fileCache, file_id, fileEntry->context);
         file_api->set_file_name(ssnptr, fileEntry->file_name, fileEntry->file_name_size, true);
         fileEntry->file_name_size = 0;
     }

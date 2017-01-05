@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2008-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -52,6 +52,10 @@
 
 #ifdef DCE2_LOG_EXTRA_DATA
 #include "Unified2_common.h"
+#endif
+
+#ifdef DUMP_BUFFER
+#include "dcerpc2_buffer_dump.h"
 #endif
 
 /********************************************************************
@@ -167,6 +171,10 @@ void DCE2_RegisterPreprocessor(void)
     _dpd.registerPreproc(DCE2_SNAME, DCE2_InitServer,
                          DCE2_ReloadServer, NULL, NULL, NULL);
 #endif
+#ifdef DUMP_BUFFER
+    _dpd.registerBufferTracer(getDCERPC2Buffers, DCERPC2_BUFFER_DUMP_FUNC);
+#endif
+
 }
 
 /*********************************************************************
@@ -445,6 +453,10 @@ static void DCE2_Main(void *pkt, void *context)
     DEBUG_WRAP(DCE2_DebugMsg(DCE2_DEBUG__ALL, "%s\n", DCE2_DEBUG__START_MSG));
 
     sfPolicyUserPolicySet (dce2_config, _dpd.getNapRuntimePolicy());
+
+#ifdef DUMP_BUFFER
+    dumpBufferInit();
+#endif
 
 #ifdef DEBUG_MSGS
     if (DCE2_SsnFromServer(p))

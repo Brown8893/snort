@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -77,6 +77,10 @@ int imapDetectCalled = 0;
 
 #include "file_api.h"
 
+#ifdef DUMP_BUFFER
+#include "imap_buffer_dump.h"
+#endif
+
 const int MAJOR_VERSION = 1;
 const int MINOR_VERSION = 0;
 const int BUILD_VERSION = 1;
@@ -135,6 +139,10 @@ void SetupIMAP(void)
     _dpd.registerPreproc("imap", IMAPInit, IMAPReload,
                          IMAPReloadVerify, IMAPReloadSwap, IMAPReloadSwapFree);
 #endif
+#ifdef DUMP_BUFFER
+    _dpd.registerBufferTracer(getIMAPBuffers, IMAP_BUFFER_DUMP_FUNC);
+#endif
+
 }
 
 

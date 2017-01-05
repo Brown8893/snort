@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2003-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -65,6 +65,12 @@
 #include "hi_util_xmalloc.h"
 #include "hi_cmd_lookup.h"
 #include "hi_paf.h"
+#include "h2_paf.h"
+
+#ifdef DUMP_BUFFER
+#include "hi_buffer_dump.h"
+#endif
+
 #include "file_decomp.h"
 
 #include "snort.h"
@@ -123,10 +129,15 @@ tSfPolicyUserContextId hi_config = NULL;
 #ifdef TARGET_BASED
 /* Store the protocol id received from the stream reassembler */
 int16_t hi_app_protocol_id;
+int16_t h2_app_protocol_id;
 #endif
 
 #ifdef PERF_PROFILING
 PreprocStats hiPerfStats;
+PreprocStats hi2PerfStats;
+PreprocStats hi2InitPerfStats;
+PreprocStats hi2PayloadPerfStats;
+PreprocStats hi2PseudoPerfStats;
 PreprocStats hiDetectPerfStats;
 int hiDetectCalled = 0;
 #endif
@@ -144,6 +155,10 @@ MemPool *mime_decode_mempool = NULL;
 MemPool *mime_log_mempool = NULL;
 int hex_lookup[256];
 int valid_lookup[256];
+
+char** xffFields = NULL;
+static char** oldXffFields = NULL;
+
 /*
 ** Prototypes
 */
@@ -165,7 +180,7 @@ static void HttpInspectRegisterRuleOptions(struct _SnortConfig *);
 static void HttpInspectRegisterXtraDataFuncs(HTTPINSPECT_GLOBAL_CONF *);
 static inline void InitLookupTables(void);
 #ifdef TARGET_BASED
-static void HttpInspectAddServicesOfInterest(struct _SnortConfig *, tSfPolicyId);
+static void HttpInspectAddServicesOfInterest(struct _SnortConfig *, HTTPINSPECT_GLOBAL_CONF *, tSfPolicyId);
 #endif
 
 #ifdef SNORT_RELOAD
@@ -296,6 +311,7 @@ static void HttpInspectDropStats(int exiting)
     LogMessage("    Gzip Compressed Data Processed:       %-10.2f\n", (double)hi_stats.compr_bytes_read);
     LogMessage("    Gzip Decompressed Data Processed:     %-10.2f\n", (double)hi_stats.decompr_bytes_read);
     }
+    LogMessage("    Http/2 Rebuilt Packets:               %-10I64u\n", hi_stats.h2_rebuilt_packets);
     LogMessage("    Total packets processed:              %-10I64u\n", hi_stats.total);
 #else
     LogMessage("    POST methods:                         "FMTu64("-10")"\n", hi_stats.post);
@@ -346,6 +362,7 @@ static void HttpInspectDropStats(int exiting)
     LogMessage("    Gzip Compressed Data Processed:       %-10.2f\n", (double)hi_stats.compr_bytes_read);
     LogMessage("    Gzip Decompressed Data Processed:     %-10.2f\n", (double)hi_stats.decompr_bytes_read);
     }
+    LogMessage("    Http/2 Rebuilt Packets:               "FMTu64("-10")"\n", hi_stats.h2_rebuilt_packets);
     LogMessage("    Total packets processed:              "FMTu64("-10")"\n", hi_stats.total);
 #endif
 }
@@ -358,6 +375,7 @@ static void HttpInspectCleanExit(int signal, void *data)
 
     HI_SearchFree();
 
+    oldXffFields = xffFields;
     HttpInspectFreeConfigs(hi_config);
 
     if (mempool_destroy(hi_gzip_mempool) == 0)
@@ -517,6 +535,15 @@ static void HttpInspectInit(struct _SnortConfig *sc, char *args)
                    __FILE__, __LINE__);
     }
 
+    if (!xffFields)
+    {
+        if ((xffFields = calloc(1, HTTP_MAX_XFF_FIELDS * sizeof(char *))) == NULL)
+        {
+            FatalError("http_inspect: %s(%d) failed to allocate memory for XFF fields\n", 
+                       __FILE__, __LINE__);
+        }
+    }
+
     if (hi_config == NULL)
     {
         hi_config = sfPolicyConfigCreate();
@@ -535,14 +562,19 @@ static void HttpInspectInit(struct _SnortConfig *sc, char *args)
 
 #ifdef PERF_PROFILING
         RegisterPreprocessorProfile("httpinspect", &hiPerfStats, 0, &totalPerfStats, NULL);
+        RegisterPreprocessorProfile("http2inspect", &hi2PerfStats, 0, &totalPerfStats, NULL);
+        RegisterPreprocessorProfile("h2_init", &hi2InitPerfStats, 1, &hi2PerfStats, NULL);
+        RegisterPreprocessorProfile("h2_payload", &hi2PayloadPerfStats, 1, &hi2PerfStats, NULL);
+        RegisterPreprocessorProfile("h2_pseudo", &hi2PseudoPerfStats, 1, &hi2PerfStats, NULL);
 #endif
 
 #ifdef TARGET_BASED
         /* Find and cache protocol ID for packet comparison */
         hi_app_protocol_id = AddProtocolReference("http");
-
+        h2_app_protocol_id = AddProtocolReference("http2");
         // register with session to handle applications
         session_api->register_service_handler( PP_HTTPINSPECT, hi_app_protocol_id );
+        session_api->register_service_handler( PP_HTTPINSPECT, h2_app_protocol_id);
 
 #endif
         hi_paf_init(0);  // FIXTHIS is cap needed?
@@ -685,6 +717,9 @@ void SetupHttpInspect(void)
     RegisterPreprocessor(SERVER_KEYWORD, HttpInspectInit,
                          HttpInspectReload, NULL, NULL, NULL);
 #endif
+#ifdef DUMP_BUFFER
+    RegisterBufferTracer(getHTTPDumpBuffers, HTTP_BUFFER_DUMP_FUNC);
+#endif
     InitLookupTables();
     InitJSNormLookupTable();
     (void)File_Decomp_OneTimeInit();
@@ -773,7 +808,7 @@ static int HttpInspectVerifyPolicy(struct _SnortConfig *sc, tSfPolicyUserContext
     }
 
 #ifdef TARGET_BASED
-    HttpInspectAddServicesOfInterest(sc, policyId);
+    HttpInspectAddServicesOfInterest(sc, pPolicyConfig, policyId);
 #endif
     updateConfigFromFileProcessing(pPolicyConfig);
     HttpInspectAddPortsOfInterest(sc, pPolicyConfig, policyId);
@@ -804,7 +839,7 @@ static void HttpInspectAddPortsOfInterest(struct _SnortConfig *sc, HTTPINSPECT_G
     hi_ui_server_iterate(sc, config->server_lookup, addServerConfPortsToStream);
 }
 
-/**Add server ports from http_inspect preprocessor from snort.comf file to pass through
+/**Add server ports from http_inspect preprocessor from snort.conf file to pass through
  * port filtering.
  */
 static void addServerConfPortsToStream(struct _SnortConfig *sc, void *pData)
@@ -835,9 +870,21 @@ static void addServerConfPortsToStream(struct _SnortConfig *sc, void *pData)
                 // has a flow depth enabled (per direction).  still, if eg
                 // all server_flow_depths are -1, we will only enable client.
                 if (fileDepth > 0)
+                {
                     hi_paf_register_port(sc, (uint16_t)i, client, server, httpCurrentPolicy, true);
+#ifdef HAVE_LIBNGHTTP2
+                    if (pConf->h2_mode)
+                        h2_paf_register_port(sc, (uint16_t)i, client, server, httpCurrentPolicy, true);
+#endif /* HAVE_LIBNGHTTP2 */
+                }
                 else
+                {
                     hi_paf_register_port(sc, (uint16_t)i, client, server, httpCurrentPolicy, false);
+#ifdef HAVE_LIBNGHTTP2
+                    if (pConf->h2_mode)
+                        h2_paf_register_port(sc, (uint16_t)i, client, server, httpCurrentPolicy, false);
+#endif /* HAVE_LIBNGHTTP2 */
+                }
             }
         }
     }
@@ -847,18 +894,50 @@ static void addServerConfPortsToStream(struct _SnortConfig *sc, void *pData)
 /**
  * @param service ordinal number of service.
  */
-static void HttpInspectAddServicesOfInterest(struct _SnortConfig *sc, tSfPolicyId policy_id)
+static void HttpInspectAddServicesOfInterest(struct _SnortConfig *sc, HTTPINSPECT_GLOBAL_CONF *config, tSfPolicyId policy_id)
 {
+    if ((config == NULL) || (!config->global_server))
+        return;
+
     /* Add ordinal number for the service into stream5 */
     if (hi_app_protocol_id != SFTARGET_UNKNOWN_PROTOCOL)
     {
         stream_api->set_service_filter_status(sc, hi_app_protocol_id, PORT_MONITOR_SESSION, policy_id, 1);
 
         if (file_api->get_max_file_depth() > 0)
+        {
             hi_paf_register_service(sc, hi_app_protocol_id, true, true, policy_id, true);
+#ifdef HAVE_LIBNGHTTP2
+            if (config->global_server->h2_mode)
+                h2_paf_register_service(sc, hi_app_protocol_id, true, true, policy_id, true);
+#endif
+        }
         else
+        {
             hi_paf_register_service(sc, hi_app_protocol_id, true, true, policy_id, false);
+#ifdef HAVE_LIBNGHTTP2
+            if (config->global_server->h2_mode)
+                h2_paf_register_service(sc, hi_app_protocol_id, true, true, policy_id, false);
+#endif
+        }
     }
+
+/*
+#ifdef HAVE_LIBNGHTTP2
+    if ((config == NULL) || (!config->global_server))
+        return;
+
+    if ((h2_app_protocol_id != SFTARGET_UNKNOWN_PROTOCOL) && (config->global_server->h2_mode))
+    {
+        stream_api->set_service_filter_status(sc, h2_app_protocol_id, PORT_MONITOR_SESSION, policy_id, 1);
+
+        if (file_api->get_max_file_depth() > 0)
+            h2_paf_register_service(sc, h2_app_protocol_id, true, true, policy_id, true);
+        else
+            h2_paf_register_service(sc, h2_app_protocol_id, true, true, policy_id, false);
+    }
+
+#endif */ /* HAVE_LIBNGHTTP2 */
 }
 #endif
 
@@ -1377,6 +1456,14 @@ static int HttpInspectFreeConfigPolicy(tSfPolicyUserContextId config,tSfPolicyId
 
 static void HttpInspectFreeConfigs(tSfPolicyUserContextId config)
 {
+    int i;
+
+    for (i = 0; (i < HTTP_MAX_XFF_FIELDS) && (oldXffFields[i]); i++)
+    {
+        free(oldXffFields[i]);
+    }
+    free(oldXffFields);
+    oldXffFields = NULL;
 
     if (config == NULL)
         return;
@@ -1398,12 +1485,12 @@ static void HttpInspectFreeConfig(HTTPINSPECT_GLOBAL_CONF *config)
     if (config->global_server != NULL)
     {
         int i;
-        for( i=0; i<HI_UI_CONFIG_MAX_XFF_FIELD_NAMES; i++ )
-             if( config->global_server->xff_headers[i] != NULL )
-             {
-                  free(  config->global_server->xff_headers[i] );
-                  config->global_server->xff_headers[i] = NULL;
-             }
+        for( i=0; i<HTTP_MAX_XFF_FIELDS; i++ )
+            if( config->global_server->xff_headers[i] != NULL )
+            {
+                free(  config->global_server->xff_headers[i] );
+                config->global_server->xff_headers[i] = NULL;
+            }
 
         http_cmd_lookup_cleanup(&(config->global_server->cmd_lookup));
         free(config->global_server);
@@ -1433,6 +1520,16 @@ static void _HttpInspectReload(struct _SnortConfig *sc, tSfPolicyUserContextId h
     {
         FatalError("%s(%d)strtok returned NULL when it should not.",
                    __FILE__, __LINE__);
+    }
+
+    if (!oldXffFields)
+    {
+        oldXffFields = xffFields;
+        if ((xffFields = calloc(1, HTTP_MAX_XFF_FIELDS * sizeof(char *))) == NULL)
+        {
+            FatalError("http_inspect: %s(%d) failed to allocate memory for XFF fields\n", 
+                       __FILE__, __LINE__);
+        }
     }
 
     /*

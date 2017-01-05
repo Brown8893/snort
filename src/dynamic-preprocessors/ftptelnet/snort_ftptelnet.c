@@ -1,7 +1,7 @@
 /*
  * snort_ftptelnet.c
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2004-2013 Sourcefire, Inc.
  * Steven A. Sturges <ssturges@sourcefire.com>
  * Daniel J. Roelker <droelker@sourcefire.com>
@@ -96,6 +96,10 @@
 #include "Unified2_common.h"
 #include "ssl_include.h"
 #include <daq_common.h>
+
+#ifdef DUMP_BUFFER
+#include "ftptelnet_buffer_dump.h"
+#endif
 
 #ifdef PERF_PROFILING
 extern PreprocStats ftpPerfStats;
@@ -4048,6 +4052,10 @@ int SnortTelnet(FTPTELNET_GLOBAL_CONF *GlobalConf, TELNET_SESSION *TelnetSession
     int iRet;
     PROFILE_VARS;
 
+#ifdef DUMP_BUFFER
+    dumpBuffer(TELNET_DUMP,(const char *)p->payload,p->payload_size);
+#endif
+
     if (!TelnetSession)
     {
         if (GlobalConf->inspection_type == FTPP_UI_CONFIG_STATEFUL)
@@ -4236,6 +4244,10 @@ int SnortFTPTelnet(SFSnortPacket *p)
     FTP_TELNET_SESSION *ft_ssn = NULL;
     tSfPolicyId policy_id = _dpd.getNapRuntimePolicy();
     FTPTELNET_GLOBAL_CONF *GlobalConf = NULL;
+
+#ifdef DUMP_BUFFER
+    dumpBufferInit();
+#endif
 
     sfPolicyUserPolicySet (ftp_telnet_config, policy_id);
     GlobalConf = (FTPTELNET_GLOBAL_CONF *)sfPolicyUserDataGetCurrent(ftp_telnet_config);
@@ -4711,7 +4723,7 @@ static int _addFtpServerConfPortsToStream(struct _SnortConfig *sc, void *pData)
 // preproc will deal with any pipelined commands
 static PAF_Status ftp_paf (
         void* ssn, void** pv, const uint8_t* data, uint32_t len,
-        uint32_t flags, uint32_t* fp)
+        uint64_t *flags, uint32_t* fp, uint32_t* fp_eoh)
 {
 #ifdef HAVE_MEMRCHR
     uint8_t* lf =  memrchr(data, '\n', len);

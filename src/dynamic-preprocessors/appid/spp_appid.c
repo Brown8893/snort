@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -193,6 +193,7 @@ STATIC void *AppIdReloadSwap(struct _SnortConfig *sc, void *swap_config)
     if (swap_config)
     {
         old_config = AppIdCommonReloadSwap(swap_config);
+        ThirdPartyAppIDReconfigure();
 
         gettimeofday(&endTime, NULL);
         elapsedTime = (endTime.tv_sec*1000.0) + (endTime.tv_usec/1000.0) - (startTime.tv_sec*1000.0) - (startTime.tv_usec/1000.0);
@@ -283,6 +284,7 @@ STATIC int AppIdReconfigureSwap(uint16_t type, void *new_context, void **old_con
         {
             // Return current configuration in old_context
             *old_context = AppIdCommonReloadSwap(new_context);
+            ThirdPartyAppIDReconfigure();
         }
     }
 

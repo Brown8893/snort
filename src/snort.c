@@ -1,6 +1,6 @@
 /* $Id$ */
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2002-2013 Sourcefire, Inc.
 ** Copyright (C) 1998-2002 Martin Roesch <roesch@sourcefire.com>
 **
@@ -204,6 +204,7 @@
 #endif
 
 #define DEFAULT_PAF_MAX  16384
+#define DEFAULT_FTP_DATA_TRIM_THRESHOLD 2
 
 /* Data types *****************************************************************/
 
@@ -482,8 +483,21 @@ static struct option long_options[] =
 
    {"suppress-config-log", LONGOPT_ARG_NONE, NULL, SUPPRESS_CONFIG_LOG},
 
+#ifdef DUMP_BUFFER
+   {"buffer-dump", LONGOPT_ARG_OPTIONAL, NULL, BUFFER_DUMP},
+   {"buffer-dump-alert", LONGOPT_ARG_OPTIONAL, NULL, BUFFER_DUMP_ALERT},
+#endif
+
    {0, 0, 0, 0}
 };
+
+#ifdef DUMP_BUFFER
+bool dump_alert_only;
+bool dumped_state;
+bool dump_enabled;
+TraceBuffer *(*getBuffers[MAX_BUFFER_DUMP_FUNC])(void);
+BufferDumpEnableMask bdmask;
+#endif
 
 typedef void (*log_func_t)(Packet*);
 static void LogPacket (Packet* p)
@@ -1547,8 +1561,18 @@ static void PrintVersion(void)
 {
     DisplayBanner();
 
-    //  Get and print out library versions
+/*  Get and print out library versions.
+ *  This information would be printed only for one Snort instance which doesn't
+ *  have --suppress-config-log option. For Snort instances with --supress-config-log,
+ *  we print only banner to provide some info about Snort process being started/reloaded.
+ *  This change is done to avoid duplicate logging of plugin information.
+ */
+    if (ScSuppressConfigLog() || ScVersionMode())
+        ScSetInternalLogLevel(INTERNAL_LOG_LEVEL__ERROR);
+
     DisplayDynamicPluginVersions();
+
+    ScRestoreInternalLogLevel();
 }
 
 static void PrintDaqModules (SnortConfig* sc, char* dir)
@@ -2124,6 +2148,10 @@ static int ShowUsage(char *program_name)
     FPUTS_BOTH ("   --ha-out <file>                 Write high-availability events to this file.\n");
     FPUTS_BOTH ("   --ha-in <file>                  Read high-availability events from this file on startup (warm-start).\n");
     FPUTS_BOTH ("   --suppress-config-log           Suppress configuration information output.\n");
+#ifdef DUMP_BUFFER
+    FPUTS_BOTH ("   --buffer-dump=<file>            Dump buffers for all packets\n");
+    FPUTS_BOTH ("   --buffer-dump-alert=<file>            Dump buffers when a rule triggers\n");
+#endif
 #undef FPUTS_WIN32
 #undef FPUTS_UNIX
 #undef FPUTS_BOTH
@@ -2941,6 +2969,22 @@ static void ParseCmdLine(int argc, char **argv)
             case SUPPRESS_CONFIG_LOG:
                 sc->suppress_config_log = 1;
                 break;
+
+#ifdef DUMP_BUFFER
+            case BUFFER_DUMP:
+                dump_alert_only = false;
+                dump_enabled = true;
+                ConfigBufferDump(sc, optarg);
+		ParseOutput(sc, NULL, "log_buffer_dump");
+                break;
+
+            case BUFFER_DUMP_ALERT:
+                dump_alert_only = true;
+                dump_enabled = true;
+                ConfigBufferDump(sc, optarg);
+                ParseOutput(sc, NULL, "log_buffer_dump");
+                break;
+#endif
 
             case '?':  /* show help and exit with 1 */
                 PrintVersion();
@@ -4195,6 +4239,7 @@ SnortConfig * SnortConfNew(void)
     sc->max_ip6_extensions = DEFAULT_MAX_IP6_EXTENSIONS;
 
     sc->internal_log_level = INTERNAL_LOG_LEVEL__MESSAGE;
+    sc->ftp_data_trim_threshold = DEFAULT_FTP_DATA_TRIM_THRESHOLD;
 
     return sc;
 }
@@ -4368,6 +4413,11 @@ void SnortConfFree(SnortConfig *sc)
 #ifdef SIDE_CHANNEL
     if (sc->side_channel_config.opts)
         free(sc->side_channel_config.opts);
+#endif
+
+#ifdef DUMP_BUFFER
+    if (sc->buffer_dump_file)
+        StringVector_Delete(sc->buffer_dump_file);
 #endif
 
 #ifdef INTEL_SOFT_CPM
@@ -4863,6 +4913,15 @@ static SnortConfig * MergeSnortConfs(SnortConfig *cmd_line, SnortConfig *config_
 
 #endif
 
+#ifdef DUMP_BUFFER
+    /* Command line overwrites daq_dirs */
+    if (config_file->buffer_dump_file)
+        StringVector_Delete(config_file->buffer_dump_file);
+
+    config_file->buffer_dump_file = StringVector_New();
+    StringVector_AddVector(config_file->buffer_dump_file, cmd_line->buffer_dump_file);
+#endif
+
     return config_file;
 }
 
@@ -4962,6 +5021,9 @@ void FreeVarList(VarNode *head)
 
 void SnortInit(int argc, char **argv)
 {
+#ifdef WIN32
+    char dllSearchPath[PATH_MAX];
+#endif
     InitSignals();
 
 #if defined(NOCOREFILE) && !defined(WIN32)
@@ -4971,6 +5033,14 @@ void SnortInit(int argc, char **argv)
 #endif
 
 #ifdef WIN32
+    if(GetSystemDirectory(dllSearchPath, PATH_MAX))
+    {
+        LogMessage("System directory is: %s\n", dllSearchPath);
+        if (!SetDllDirectory(dllSearchPath))
+            FatalError("Failed to set Windows DLL search path.\n");
+    }
+    else
+        FatalError("Could not find the Windows System directory.\n");
     if (!init_winsock()) // TBD moves to windows daq
         FatalError("Could not Initialize Winsock!\n");
 #endif

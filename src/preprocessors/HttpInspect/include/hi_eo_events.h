@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2003-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -88,6 +88,8 @@ typedef enum _HI_EVENTS
     HI_EO_SERVER_PDF_CASC_COMP,
     HI_EO_SERVER_PDF_PARSE_FAILURE,
     HI_EO_SERVER_PROTOCOL_OTHER,
+    HI_EO_SERVER_MULTIPLE_CONTLEN,
+    HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING,
     HI_EO_SERVER_EVENT_NUM
 }HI_EVENTS;
 
@@ -204,6 +206,11 @@ typedef enum _HI_EVENTS
     "(http_inspect) HTTP_RESPONSE PDF FILE PARSE FAILURE"
 #define HI_EO_SERVER_PROTOCOL_OTHER_STR			\
     "(http_inspect) PROTOCOL-OTHER HTTP server response before client request "
+#define HI_EO_SERVER_MULTIPLE_CONTLEN_STR               \
+    "(http_inspect) MULTIPLE CONTENT LENGTH IN HTTP RESPONSE"
+#define HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING_STR      \
+    "(http_inspect) MULTIPLE CONTENT ENCODING IN HTTP RESPONSE"
+
 /*
 **  Event Priorities
 */

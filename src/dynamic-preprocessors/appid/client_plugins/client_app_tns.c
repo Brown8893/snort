@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -426,7 +426,7 @@ done:
         username[user_size] = 0;
         tns_client_mod.api->add_user(flowp, username, APP_ID_ORACLE_DATABASE, 1);
     }
-    setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
+    setAppIdFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
     return CLIENT_APP_SUCCESS;
 }
 

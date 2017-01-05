@@ -1,7 +1,7 @@
 /*
  **
  **
- **  Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ **  Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  **  Copyright (C) 2012-2013 Sourcefire, Inc.
  **
  **  This program is free software; you can redistribute it and/or modify
@@ -110,7 +110,8 @@ static FilePosition get_file_position(void *pkt);
 static bool check_paf_abort(void* ssn);
 static int64_t get_max_file_capture_size(void *ssn);
 static void file_session_free(void *session_data);
-extern FileEntry *file_cache_get(FileCache *fileCache, void* p, uint64_t file_id);
+extern FileEntry *file_cache_get(FileCache *fileCache, void* p, uint64_t file_id,
+    bool can_create);
 
 FileAPI fileAPI;
 FileAPI* file_api = NULL;
@@ -481,13 +482,15 @@ static inline int check_http_partial_content(Packet *p)
     uint32_t type = 0;
     uint32_t file_sig;
     const HttpBuffer* hb = GetHttpBuffer(HTTP_BUFFER_STAT_CODE);
-
-    /*Not HTTP response, return*/
-    if ( !hb )
-        return 0;
+    bool partial_cont = isHttpRespPartialCont(p->ssnptr);
 
     /*Not partial content, return*/
-    if ( (hb->length != 3) || strncmp((const char*)hb->buf, "206", 3) )
+    if (hb)
+    {
+        if (((hb->length != 3) || strncmp((const char*)hb->buf, "206", 3)) && !partial_cont)
+            return 0;
+    }
+    else if (!partial_cont)
         return 0;
 
     /*Use URI as the identifier for file*/
@@ -688,15 +691,11 @@ static void file_signature_callback(Packet* p)
 
     if(file_session->file_cache)
     {
-        fileEntry = file_cache_get(file_session->file_cache, p, file_session->file_id);
-        if (!fileEntry)
-            return;
-        if (fileEntry->context)
+        fileEntry = file_cache_get(file_session->file_cache, p, file_session->file_id, false);
+        if (fileEntry && fileEntry->context &&
+            (fileEntry->context->verdict == FILE_VERDICT_PENDING))
         {
-            if(fileEntry->context->verdict == FILE_VERDICT_PENDING)
-            {
-                file_session->current_context = fileEntry->context;
-            }
+            file_session->current_context = fileEntry->context;
             file_signature_lookup(p, 1);
         }
     }

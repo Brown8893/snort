@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -421,13 +421,14 @@ static PAF_Status pop_paf_client(void *ssn, PopPafData *pfdata,
      uint32_t - length of payload data
      uint32_t - flags to check whether client or server
      uint32_t * - pointer to set flush point
+     uint32_t * - pointer to set header flush point
 
    Returns:
     PAF_Status - PAF_FLUSH if flush point found, PAF_SEARCH otherwise
 */
 
 static PAF_Status pop_paf(void* ssn, void** ps, const uint8_t* data,
-        uint32_t len, uint32_t flags, uint32_t* fp)
+        uint32_t len, uint64_t *flags, uint32_t* fp, uint32_t* fp_eoh)
 {
 
     PopPafData *pfdata = *(PopPafData **)ps;
@@ -448,7 +449,7 @@ static PAF_Status pop_paf(void* ssn, void** ps, const uint8_t* data,
     }
 
 
-    if (flags & FLAG_FROM_SERVER)
+    if (*flags & FLAG_FROM_SERVER)
     {
        DEBUG_WRAP(DebugMessage(DEBUG_POP, "PAF: From server.\n"););
         return pop_paf_server(pfdata, data, len, fp);

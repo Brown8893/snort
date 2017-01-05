@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -349,7 +349,7 @@ static CLIENT_APP_RETCODE rtp_validate(const uint8_t *data, uint16_t size, const
     }
 
     rtp_client_mod.api->add_app(flowp, APP_ID_RTP, APP_ID_RTP, NULL);
-    setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
+    setAppIdFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
     return CLIENT_APP_SUCCESS;
 }
 

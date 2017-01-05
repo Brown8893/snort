@@ -16,7 +16,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * Author: Steve Sturges
@@ -987,6 +987,7 @@ int RegisterOneRule(struct _SnortConfig *sc, Rule *rule, int registerRule)
                 break;
 
             case OPTION_TYPE_BYTE_TEST:
+            case OPTION_TYPE_BYTE_MATH:
             case OPTION_TYPE_BYTE_JUMP:
                 {
                     ByteData *byte = option->option_u.byte;
@@ -1178,6 +1179,7 @@ static void FreeOneRule(void *data)
                     }
                 }
             case OPTION_TYPE_BYTE_TEST:
+            case OPTION_TYPE_BYTE_MATH:
             case OPTION_TYPE_BYTE_JUMP:
             case OPTION_TYPE_FILE_DATA:
             case OPTION_TYPE_PKT_DATA:

@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 ** Copyright (C) 1998-2005 Martin Roesch <roesch@sourcefire.com>
 **
@@ -302,6 +302,11 @@ typedef enum _GetOptLongIds
     ARG_HA_PDTS_IN,
 
     SUPPRESS_CONFIG_LOG,
+
+#ifdef DUMP_BUFFER
+    BUFFER_DUMP,
+    BUFFER_DUMP_ALERT,
+#endif
 
     GET_OPT_LONG_IDS_MAX
 
@@ -972,6 +977,12 @@ typedef struct _SnortConfig
 
     struct _MandatoryEarlySessionCreator* mandatoryESCreators;
     bool normalizer_set;
+
+#ifdef DUMP_BUFFER
+    char *buffer_dump_file;
+#endif
+    uint32_t ftp_data_trim_threshold;
+
 } SnortConfig;
 
 /* struct to collect packet statistics */
@@ -1115,6 +1126,12 @@ typedef struct _PcapReadObject
     char *filter;
 
 } PcapReadObject;
+
+typedef enum _EnableProtoFlag
+{
+    PROTO_FTP_DATA_NORMALIZE           = 0x00000001,
+    PROTO_HTTP_PAF_FLUSH_POST_HDR      = 0x00000002
+}EnableProtoFlag;
 
 /* ptr to the packet processor */
 typedef void (*grinder_t)(Packet *, const DAQ_PktHdr_t*, const uint8_t *);

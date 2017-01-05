@@ -5,8 +5,8 @@ INCLUDES = -I${top_builddir}/src/dynamic-preprocessors/include \
 	-I$(APPID_SRC_DIR)/util \
 	-I$(APPID_SRC_DIR)/service_plugins \
 	-I$(APPID_SRC_DIR)/client_plugins  \
-	-I$(APPID_SRC_DIR)/detector_plugins \
-        -I${srcdir}/../libs 
+	-I$(APPID_SRC_DIR)/detector_plugins \ 
+        -I${srcdir}/../libs  
 
 APPID_SOURCES =  \
 	$(APPID_SRC_DIR)/commonAppMatcher.c  \
@@ -54,10 +54,8 @@ APPID_SOURCES +=  \
 	$(APPID_SRC_DIR)/client_plugins/client_app_ym.c \
 	$(APPID_SRC_DIR)/client_plugins/client_app_msn.c \
 	$(APPID_SRC_DIR)/client_plugins/client_app_aim.c \
-	$(APPID_SRC_DIR)/client_plugins/client_app_smtp.c \
 	$(APPID_SRC_DIR)/client_plugins/client_app_msn.h \
 	$(APPID_SRC_DIR)/client_plugins/client_app_aim.h \
-	$(APPID_SRC_DIR)/client_plugins/client_app_smtp.h \
 	$(APPID_SRC_DIR)/client_plugins/client_app_ym.h \
 	$(APPID_SRC_DIR)/client_plugins/client_app_api.h \
 	$(APPID_SRC_DIR)/client_plugins/client_app_base.h \
@@ -109,7 +107,6 @@ APPID_SOURCES +=  \
 	$(APPID_SRC_DIR)/service_plugins/service_rpc.c \
 	$(APPID_SRC_DIR)/service_plugins/service_flap.h \
 	$(APPID_SRC_DIR)/service_plugins/service_telnet.h \
-	$(APPID_SRC_DIR)/service_plugins/service_smtp.c \
 	$(APPID_SRC_DIR)/service_plugins/service_bgp.c \
 	$(APPID_SRC_DIR)/service_plugins/service_direct_connect.c \
 	$(APPID_SRC_DIR)/service_plugins/service_irc.c \
@@ -127,7 +124,6 @@ APPID_SOURCES +=  \
 	$(APPID_SRC_DIR)/service_plugins/service_snmp.h \
 	$(APPID_SRC_DIR)/service_plugins/service_bgp.h \
 	$(APPID_SRC_DIR)/service_plugins/service_MDNS.c \
-	$(APPID_SRC_DIR)/service_plugins/service_smtp.h \
 	$(APPID_SRC_DIR)/service_plugins/service_irc.h \
 	$(APPID_SRC_DIR)/service_plugins/service_dcerpc.c \
 	$(APPID_SRC_DIR)/service_plugins/service_ssl.c \
@@ -149,6 +145,7 @@ APPID_SOURCES +=  \
 	$(APPID_SRC_DIR)/detector_plugins/detector_imap.c  \
 	$(APPID_SRC_DIR)/detector_plugins/detector_kerberos.c  \
 	$(APPID_SRC_DIR)/detector_plugins/detector_pop3.c \
+	$(APPID_SRC_DIR)/detector_plugins/detector_smtp.c \
 	$(APPID_SRC_DIR)/detector_plugins/detector_sip.c \
 	$(APPID_SRC_DIR)/detector_plugins/detector_sip.h \
 	$(APPID_SRC_DIR)/detector_plugins/detector_pattern.c \

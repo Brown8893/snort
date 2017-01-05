@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2003-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -112,7 +112,7 @@ extern int SetBinaryNorm(HI_SESSION *, const u_char *, const u_char *, const u_c
 extern int SetParamField(HI_SESSION *, const u_char *, const u_char *, const u_char **, URI_PTR *);
 extern int SetProxy(HI_SESSION *, const u_char *, const u_char *, const u_char **, URI_PTR *);
 extern const u_char *extract_http_cookie(const u_char *p, const u_char *end, HEADER_PTR *, HEADER_FIELD_PTR *);
-extern const u_char *extract_http_content_length(HI_SESSION *, HTTPINSPECT_CONF *, const u_char *, const u_char *, const u_char *, HEADER_PTR *, HEADER_FIELD_PTR *) ;
+extern const u_char *extract_http_content_length(HI_SESSION *, HTTPINSPECT_CONF *, const u_char *, const u_char *, const u_char *, HEADER_PTR *, HEADER_FIELD_PTR *, int) ;
 
 #define CLR_SERVER_HEADER(Server) \
     do { \
@@ -452,12 +452,17 @@ static inline const u_char *extract_http_content_type_charset(HI_SESSION *Sessio
 
 static inline const u_char *extract_http_content_encoding(HTTPINSPECT_CONF *ServerConf,
         const u_char *p, const u_char *start, const u_char *end, HEADER_PTR *header_ptr,
-        HEADER_FIELD_PTR *header_field_ptr)
+        HEADER_FIELD_PTR *header_field_ptr,HI_SESSION *Session)
 {
     const u_char *crlf;
     int space_present = 0;
     if (header_ptr->content_encoding.cont_encoding_start)
     {
+        if(hi_eo_generate_event(Session, HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING))
+        {
+            hi_eo_server_event_log(Session, HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING, NULL, NULL);
+        }
+
         header_ptr->header.uri_end = p;
         header_ptr->content_encoding.compress_fmt = 0;
         return p;
@@ -524,12 +529,26 @@ static inline const u_char *extract_http_content_encoding(HTTPINSPECT_CONF *Serv
                         if(IsHeaderFieldName(p, end, HTTPRESP_HEADER_NAME__GZIP, HTTPRESP_HEADER_LENGTH__GZIP) ||
                                 IsHeaderFieldName(p, end, HTTPRESP_HEADER_NAME__XGZIP, HTTPRESP_HEADER_LENGTH__XGZIP))
                         {
+                            if (header_ptr->content_encoding.compress_fmt)
+                            {
+                                 if(hi_eo_generate_event(Session, HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING))
+                                 {
+                                     hi_eo_server_event_log(Session, HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING, NULL, NULL);
+                                 }
+                            }
                             header_field_ptr->content_encoding->compress_fmt |= HTTP_RESP_COMPRESS_TYPE__GZIP;
                             p = p + HTTPRESP_HEADER_LENGTH__GZIP;
                             continue;
                         }
                         else if(IsHeaderFieldName(p, end, HTTPRESP_HEADER_NAME__DEFLATE, HTTPRESP_HEADER_LENGTH__DEFLATE))
                         {
+                            if (header_ptr->content_encoding.compress_fmt)
+                            {
+                                if(hi_eo_generate_event(Session, HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING))
+                                {
+                                    hi_eo_server_event_log(Session, HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING, NULL, NULL);
+                                }
+                            }
                             header_field_ptr->content_encoding->compress_fmt |= HTTP_RESP_COMPRESS_TYPE__DEFLATE;
                             p = p + HTTPRESP_HEADER_LENGTH__DEFLATE;
                             continue;
@@ -730,13 +749,13 @@ static inline const u_char *extractHttpRespHeaderFieldValues(HTTPINSPECT_CONF *S
                     HTTPRESP_HEADER_LENGTH__CONTENT_ENCODING) && ServerConf->extract_gzip &&
                     parse_cont_encoding)
         {
-            p = extract_http_content_encoding(ServerConf, p, start, end, header_ptr, header_field_ptr );
+            p = extract_http_content_encoding(ServerConf, p, start, end, header_ptr, header_field_ptr,Session);
         }
         else if ( IsHeaderFieldName(p, end, HTTPRESP_HEADER_NAME__CONTENT_LENGTH,
                 HTTPRESP_HEADER_LENGTH__CONTENT_LENGTH) )
         {
             if(hsd && !hsd->resp_state.last_pkt_chunked)
-                p = extract_http_content_length(Session, ServerConf, p, start, end, header_ptr, header_field_ptr );
+                p = extract_http_content_length(Session, ServerConf, p, start, end, header_ptr, header_field_ptr, HI_SI_SERVER_MODE );
         }
     }
     else if (((p - offset) == 0) && ((*p == 'T') || (*p == 't')))
@@ -1416,7 +1435,7 @@ int HttpResponseInspection(HI_SESSION *Session, Packet *p, const unsigned char *
     uint32_t seq_num = 0;
 
     static uint32_t paf_bytes_total = 0;
-    static uint32_t paf_bytes_curr = 0;
+    static int paf_bytes_curr = 0;
     uint32_t paf_bytes_processed = 0;
 
     if (ScPafEnabled())
@@ -1665,7 +1684,11 @@ int HttpResponseInspection(HI_SESSION *Session, Packet *p, const unsigned char *
 
         }
     }
-    else if (!expected_pkt)
+    else if (expected_pkt)
+    {
+        ptr = start;
+    }
+    else
     {
         return HI_SUCCESS;
     }
@@ -1992,6 +2015,8 @@ int hi_server_inspection(void *S, Packet *p, HttpSessionData *hsd)
     {
        if( ScPafEnabled() )
        {
+	   uint8_t find_id;
+
            if(hsd->http_resp_id == XFF_MAX_PIPELINE_REQ)
               hsd->http_resp_id = 0;
            if( PacketHasStartOfPDU(p) )
@@ -2002,7 +2027,7 @@ int hi_server_inspection(void *S, Packet *p, HttpSessionData *hsd)
            }
            hsd->is_response = 1;
 
-           uint8_t find_id = (hsd->http_resp_id - 1 );
+           find_id = (hsd->http_resp_id - 1 );
            if( !find_id )
                find_id = XFF_MAX_PIPELINE_REQ;
 

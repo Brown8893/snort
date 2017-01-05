@@ -14,7 +14,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * Author: Ryan Jordan
@@ -48,6 +48,11 @@
 #include "profiler.h"
 #ifdef PERF_PROFILING
 PreprocStats dnp3PerfStats;
+#endif
+
+#ifdef DUMP_BUFFER
+#include "dnp3_buffer_dump.h"
+void dumpBufferInit(void);
 #endif
 
 const int MAJOR_VERSION = 1;
@@ -112,6 +117,9 @@ void SetupDNP3(void)
     _dpd.registerPreproc("dnp3", DNP3Init, DNP3Reload,
                          DNP3ReloadVerify, DNP3ReloadSwap, DNP3ReloadSwapFree);
 #endif
+#ifdef DUMP_BUFFER
+    _dpd.registerBufferTracer(getDNP3Buffers, DNP3_BUFFER_DUMP_FUNC);
+#endif
 }
 
 static void DNP3RegisterPortsWithSession( struct _SnortConfig *sc, dnp3_config_t *policy )
@@ -142,6 +150,10 @@ static void DNP3Init(struct _SnortConfig *sc, char *argp)
     DNP3RegisterPortsWithSession( sc, dnp3_policy );
 
     DNP3RegisterPerPolicyCallbacks(sc, dnp3_policy);
+
+#ifdef DUMP_BUFFER
+        dumpBufferInit();
+#endif
 }
 
 static inline void DNP3OneTimeInit(struct _SnortConfig *sc)

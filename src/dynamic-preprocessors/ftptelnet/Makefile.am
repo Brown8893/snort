@@ -57,6 +57,13 @@ snort_ftptelnet.h \
 spp_ftptelnet.c \
 spp_ftptelnet.h
 
+if BUILD_BUFFER_DUMP
+libsf_ftptelnet_preproc_la_SOURCES += \
+ftptelnet_buffer_dump.c \
+ftptelnet_buffer_dump.h
+endif
+
+
 EXTRA_DIST = \
 sf_ftptelnet.dsp
 

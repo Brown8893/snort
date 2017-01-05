@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -190,7 +190,7 @@ typedef struct _SERVICE_POP3_DATA
 } ServicePOP3Data;
 
 static int pop3_init(const InitServiceAPI * const init_api);
-MakeRNAServiceValidationPrototype(pop3_validate);
+static int pop3_validate(ServiceValidationArgs* args);
 
 static tRNAServiceElement svc_element =
 {
@@ -448,8 +448,8 @@ static int pop3_server_validate(POP3DetectorData *dd, const uint8_t *data, uint1
             }
             else
             {
-                setAppIdExtFlag(flowp, APPID_SESSION_ENCRYPTED);
-                clearAppIdExtFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
+                setAppIdFlag(flowp, APPID_SESSION_ENCRYPTED);
+                clearAppIdFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
                 /* we are potentially overriding the APP_ID_POP3 assessment that was made earlier. */
                 client_app_mod.api->add_app(flowp, APP_ID_POP3S, APP_ID_POP3S, NULL); // sets APPID_SESSION_CLIENT_DETECTED
             }
@@ -468,10 +468,10 @@ static int pop3_server_validate(POP3DetectorData *dd, const uint8_t *data, uint1
                 free(dd->client.username);
                 dd->client.username = NULL;
                 dd->need_continue = 0;
-                clearAppIdExtFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
+                clearAppIdFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
                 dd->client.got_user = 1;
                 if (dd->client.detected)
-                    setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
+                    setAppIdFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
             }
         }
         if (server && begin)
@@ -690,7 +690,7 @@ static CLIENT_APP_RETCODE pop3_ca_validate(const uint8_t *data, uint16_t size, c
     {
         dd->need_continue = 1;
         fd->set_flags = 1;
-        setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
+        setAppIdFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
     }
 
     if (dir == APP_ID_FROM_RESPONDER)
@@ -701,7 +701,7 @@ static CLIENT_APP_RETCODE pop3_ca_validate(const uint8_t *data, uint16_t size, c
 #endif
 
         if (pop3_server_validate(dd, data, size, flowp, 0))
-            clearAppIdExtFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
+            clearAppIdFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
         return CLIENT_APP_INPROCESS;
     }
 
@@ -724,7 +724,7 @@ static CLIENT_APP_RETCODE pop3_ca_validate(const uint8_t *data, uint16_t size, c
         if (!cmd)
         {
             dd->need_continue = 0;
-            setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
+            setAppIdFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
             return CLIENT_APP_SUCCESS;
         }
         s += cmd->length;
@@ -849,10 +849,15 @@ static CLIENT_APP_RETCODE pop3_ca_validate(const uint8_t *data, uint16_t size, c
     return CLIENT_APP_INPROCESS;
 }
 
-MakeRNAServiceValidationPrototype(pop3_validate)
+static int pop3_validate(ServiceValidationArgs* args)
 {
     POP3DetectorData *dd;
     ServicePOP3Data *pd;
+    tAppIdData *flowp = args->flowp;
+    const uint8_t *data = args->data;
+    SFSnortPacket *pkt = args->pkt; 
+    const int dir = args->dir; 
+    uint16_t size = args->size;
 
     if (!size)
         goto inprocess;
@@ -888,17 +893,17 @@ MakeRNAServiceValidationPrototype(pop3_validate)
         pd = &dd->server;
 
     if (dd->need_continue)
-        setAppIdExtFlag(flowp, APPID_SESSION_CONTINUE);
+        setAppIdFlag(flowp, APPID_SESSION_CONTINUE);
     else
     {
-        clearAppIdExtFlag(flowp, APPID_SESSION_CONTINUE);
-        if (getAppIdExtFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
+        clearAppIdFlag(flowp, APPID_SESSION_CONTINUE);
+        if (getAppIdFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
             return SERVICE_SUCCESS;
     }
 
     if (!pop3_server_validate(dd, data, size, flowp, 1))
     {
-        if (pd->count >= POP3_COUNT_THRESHOLD && !getAppIdExtFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
+        if (pd->count >= POP3_COUNT_THRESHOLD && !getAppIdFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
         {
             service_mod.api->add_service_consume_subtype(flowp, pkt, dir, &svc_element,
                                                          dd->client.state == POP3_CLIENT_STATE_STLS_CMD ? APP_ID_POP3S : APP_ID_POP3,
@@ -908,14 +913,15 @@ MakeRNAServiceValidationPrototype(pop3_validate)
             return SERVICE_SUCCESS;
         }
     }
-    else if (!getAppIdExtFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
+    else if (!getAppIdFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
     {
-        service_mod.api->fail_service(flowp, pkt, dir, &svc_element, service_mod.flow_data_index, pConfig);
+        service_mod.api->fail_service(flowp, pkt, dir, &svc_element,
+                                      service_mod.flow_data_index, args->pConfig);
         return SERVICE_NOMATCH;
     }
     else
     {
-        clearAppIdExtFlag(flowp, APPID_SESSION_CONTINUE);
+        clearAppIdFlag(flowp, APPID_SESSION_CONTINUE);
         return SERVICE_SUCCESS;
     }
 

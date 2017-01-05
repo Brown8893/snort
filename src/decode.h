@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2002-2013 Sourcefire, Inc.
 ** Copyright (C) 1998-2002 Martin Roesch <roesch@sourcefire.com>
 **
@@ -662,6 +662,9 @@ struct enc_header {
 #define PKT_FILE_EVENT_SET          0x20000000
 #define PKT_EARLY_REASSEMBLY 0x40000000  /* this packet. part of the expected stream, should have stream reassembly set */
 #define PKT_RETRANSMIT       0x80000000  /* this packet is identified as re-transmitted one */
+#define PKT_PURGE            0x0100000000  /* Stream will not flush the data */
+#define PKT_H1_ABORT         0x0200000000  /* Used by H1 and H2 paf */
+#define PKT_UPGRADE_PROTO    0x0400000000  /* Used by H1 paf */
 
 #define PKT_PDU_FULL (PKT_PDU_HEAD | PKT_PDU_TAIL)
 
@@ -1608,6 +1611,23 @@ typedef struct _MplsHdr
     uint8_t  ttl;
 } MplsHdr;
 
+typedef struct _H2PriSpec
+{
+    uint32_t stream_id;
+    uint32_t weight;
+    uint8_t  exclusive;
+} H2PriSpec;
+
+typedef struct _H2Hdr
+{
+    uint32_t length;
+    uint32_t stream_id;
+    uint8_t  type;
+    uint8_t  flags;
+    uint8_t  reserved;
+    H2PriSpec pri;
+} H2Hdr;
+
 #define PGM_NAK_ERR -1
 #define PGM_NAK_OK 0
 #define PGM_NAK_VULN 1
@@ -1714,7 +1734,7 @@ typedef struct _Packet
 
     PreprocEnableMask preprocessor_bits; /* flags for preprocessors to check */
 
-    uint32_t packet_flags;      /* special flags for the packet */
+    uint64_t packet_flags;      /* special flags for the packet */
 
     uint32_t xtradata_mask;
 
@@ -1807,6 +1827,7 @@ typedef struct _Packet
     IP6Hdr outer_ip6h, outer_orig_ip6h;
 
     MplsHdr mplsHdr;
+    H2Hdr   *h2Hdr;
 
     PseudoPacketType pseudo_type;    // valid only when PKT_PSEUDO is set
     uint16_t max_dsize;

@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -68,6 +68,10 @@
 #include "file_api.h"
 #ifdef DEBUG_MSGS
 #include "sf_types.h"
+#endif
+
+#ifdef DUMP_BUFFER
+#include "imap_buffer_dump.h"
 #endif
 
 #include "imap_paf.h"
@@ -705,6 +709,11 @@ static const uint8_t * IMAP_HandleCommand(SFSnortPacket *p, const uint8_t *ptr, 
     }
     else
     {
+
+#ifdef DUMP_BUFFER
+        dumpBuffer(IMAP_CLIENT_CMD_DUMP,ptr,eolm-ptr);
+#endif
+
         if (imap_ssn->state == STATE_UNKNOWN)
             imap_ssn->state = STATE_COMMAND;
     }
@@ -733,6 +742,10 @@ static void IMAP_ProcessClientPacket(SFSnortPacket *p)
 {
     const uint8_t *ptr = p->payload;
     const uint8_t *end = p->payload + p->payload_size;
+
+#ifdef DUMP_BUFFER
+    dumpBuffer(IMAP_CLIENT_DUMP,p->payload,p->payload_size);
+#endif
 
     ptr = IMAP_HandleCommand(p, ptr, end);
 
@@ -763,6 +776,11 @@ static void IMAP_ProcessServerPacket(SFSnortPacket *p)
 
     body_start = body_end = NULL;
 
+#ifdef DUMP_BUFFER
+    dumpBuffer(IMAP_SERVER_DUMP,p->payload,p->payload_size);
+#endif
+
+
     ptr = p->payload;
     end = p->payload + p->payload_size;
 
@@ -782,6 +800,10 @@ static void IMAP_ProcessServerPacket(SFSnortPacket *p)
                 }
                 else
                     data_end = ptr + len;
+
+#ifdef DUMP_BUFFER
+                dumpBuffer(IMAP_SERVER_BODY_DATA_DUMP,ptr,len);
+#endif
 
                 ptr = _dpd.fileAPI->process_mime_data(p, ptr, end, &(imap_ssn->mime_ssn), 0, true);
 
@@ -973,6 +995,11 @@ void SnortIMAP(SFSnortPacket *p)
     int pkt_dir;
     tSfPolicyId policy_id = _dpd.getNapRuntimePolicy();
     ssl_callback_interface_t *ssl_cb = (ssl_callback_interface_t *)_dpd.getSSLCallback();
+
+#ifdef DUMP_BUFFER
+    dumpBufferInit();
+#endif
+
 
     PROFILE_VARS;
 

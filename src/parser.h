@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2002-2013 Sourcefire, Inc.
 ** Copyright (C) 1998-2002 Martin Roesch <roesch@sourcefire.com>
 ** Copyright (C) 2000-2001 Andrew R. Baker <andrewb@uab.edu>
@@ -37,6 +37,7 @@
 #include "sflsq.h"
 #include "snort.h"
 #include "util.h"
+
 
 /* Macros *********************************************************************/
 /* Rule keywords */
@@ -99,6 +100,7 @@
 #define CONFIG_OPT__DETECTION                       "detection"
 #define CONFIG_OPT__DETECTION_FILTER                "detection_filter"
 #define CONFIG_OPT__PROTECTED_CONTENT               "protected_content"
+#define CONFIG_OPT__FTPDATA_TRIM_THRESHOLD          "ftp_data_trim_threshold"
 #ifdef INLINE_FAILOPEN
 # define CONFIG_OPT__DISABLE_INLINE_FAILOPEN         "disable_inline_init_failopen"
 #endif
@@ -220,6 +222,10 @@
 #endif
 #define CONFIG_OPT__MAX_IP6_EXTENSIONS              "max_ip6_extensions"
 #define CONFIG_OPT__DISABLE_REPLACE                 "disable_replace"
+#ifdef DUMP_BUFFER
+#define CONFIG_OPT__BUFFER_DUMP                     "buffer_dump"
+#define CONFIG_OPT__BUFFER_DUMP_ALERT               "buffer_dump_alert"
+#endif
 /* exported values */
 extern char *file_name;
 extern int file_line;
@@ -362,6 +368,7 @@ void ConfigIpsPolicyMode(SnortConfig *, char *);
 void ConfigNapPolicyMode(SnortConfig *, char *);
 void ConfigPolicyVersion(SnortConfig *, char *);
 void ConfigProtectedContent(SnortConfig *, char *);
+void ConfigFTPDataTrimThreshold(SnortConfig *, char *);
 #ifdef PPM_MGR
 void ConfigPPM(SnortConfig *, char *);
 #endif
@@ -398,6 +405,9 @@ void ConfigFile(SnortConfig *, char *);
 void ConfigTunnelVerdicts(SnortConfig*, char*);
 void ConfigMaxIP6Extensions(SnortConfig *, char*);
 void ConfigDisableReplace(SnortConfig *, char*);
+#ifdef DUMP_BUFFER
+void ConfigBufferDump(SnortConfig *, char *);
+#endif
 
 int addRtnToOtn(
         OptTreeNode *otn,

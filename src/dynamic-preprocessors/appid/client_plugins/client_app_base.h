@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -27,6 +27,8 @@
 #include "httpCommon.h"
 #include "flow.h"
 #include "appIdConfig.h"
+
+#define GENERIC_APP_OFFSET 2000000000
 
 void ClientAppInit(tAppIdConfig *pConfig);
 void ClientAppFinalize(tAppIdConfig *pConfig);

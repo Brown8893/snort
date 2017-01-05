@@ -149,6 +149,14 @@ SOURCE="..\..\detection-plugins\sp_byte_check.h"
 # End Source File
 # Begin Source File
 
+SOURCE="..\..\detection-plugins\sp_byte_math.c"
+# End Source File
+# Begin Source File
+
+SOURCE="..\..\detection-plugins\sp_byte_math.h"
+# End Source File
+# Begin Source File
+
 SOURCE="..\..\detection-plugins\sp_byte_extract.c"
 # End Source File
 # Begin Source File
@@ -769,13 +777,6 @@ SOURCE=..\..\preprocessors\HttpInspect\files\file_decomp_SWF.c
 # Begin Source File
 
 SOURCE=..\..\preprocessors\Stream6\snort_stream_icmp.c
-
-!IF  "$(CFG)" == "snort - Win32 Release"
-
-!ELSEIF  "$(CFG)" == "snort - Win32 Debug"
-
-!ENDIF 
-
 # End Source File
 # Begin Source File
 
@@ -784,13 +785,6 @@ SOURCE=..\..\preprocessors\Stream6\snort_stream_icmp.h
 # Begin Source File
 
 SOURCE=..\..\preprocessors\Stream6\snort_stream_ip.c
-
-!IF  "$(CFG)" == "snort - Win32 Release"
-
-!ELSEIF  "$(CFG)" == "snort - Win32 Debug"
-
-!ENDIF 
-
 # End Source File
 # Begin Source File
 
@@ -799,13 +793,6 @@ SOURCE=..\..\preprocessors\Stream6\snort_stream_ip.h
 # Begin Source File
 
 SOURCE=..\..\preprocessors\Stream6\snort_stream_tcp.c
-
-!IF  "$(CFG)" == "snort - Win32 Release"
-
-!ELSEIF  "$(CFG)" == "snort - Win32 Debug"
-
-!ENDIF 
-
 # End Source File
 # Begin Source File
 
@@ -814,13 +801,6 @@ SOURCE=..\..\preprocessors\Stream6\snort_stream_tcp.h
 # Begin Source File
 
 SOURCE=..\..\preprocessors\Stream6\snort_stream_udp.c
-
-!IF  "$(CFG)" == "snort - Win32 Release"
-
-!ELSEIF  "$(CFG)" == "snort - Win32 Debug"
-
-!ENDIF 
-
 # End Source File
 # Begin Source File
 
@@ -829,13 +809,6 @@ SOURCE=..\..\preprocessors\Stream6\snort_stream_udp.h
 # Begin Source File
 
 SOURCE=..\..\preprocessors\Stream6\stream_common.c
-
-!IF  "$(CFG)" == "snort - Win32 Release"
-
-!ELSEIF  "$(CFG)" == "snort - Win32 Debug"
-
-!ENDIF 
-
 # End Source File
 # Begin Source File
 
@@ -844,13 +817,6 @@ SOURCE=..\..\preprocessors\Stream6\stream_common.h
 # Begin Source File
 
 SOURCE=..\..\preprocessors\Stream6\stream_paf.c
-
-!IF  "$(CFG)" == "snort - Win32 Release"
-
-!ELSEIF  "$(CFG)" == "snort - Win32 Debug"
-
-!ENDIF 
-
 # End Source File
 # Begin Source File
 
@@ -924,6 +890,14 @@ SOURCE=..\..\preprocessors\perf.c
 # Begin Source File
 
 SOURCE=..\..\preprocessors\perf.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\preprocessors\perf_indicators.c
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\preprocessors\perf_indicators.h
 # End Source File
 # Begin Source File
 
@@ -1697,6 +1671,14 @@ SOURCE="..\..\file-process\file_mempool.h"
 # End Source File
 # Begin Source File
 
+SOURCE="..\..\file-process\file_segment_process.c"
+# End Source File
+# Begin Source File
+
+SOURCE="..\..\file-process\file_segment_process.h"
+# End Source File
+# Begin Source File
+
 SOURCE="..\..\file-process\file_mime_config.c"
 # End Source File
 # Begin Source File
@@ -1793,8 +1775,6 @@ SOURCE=..\..\decode.h
 SOURCE=..\..\detect.c
 
 !IF  "$(CFG)" == "snort - Win32 Release"
-
-# ADD CPP /I "..\..\preprocessors\Stream6" /I "..\..\preprocessors\Session"
 
 !ELSEIF  "$(CFG)" == "snort - Win32 Debug"
 

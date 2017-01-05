@@ -1,7 +1,7 @@
 /* $Id$ */
 
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2002-2013 Sourcefire, Inc.
 ** Copyright (C) 1998-2002 Martin Roesch <roesch@sourcefire.com>
 **
@@ -1553,6 +1553,11 @@ void DecodeVlan(const uint8_t * pkt, const uint32_t len, Packet * p)
                     len - sizeof(VlanTagHdr), p);
                 return;
 #endif
+            case ETHERNET_TYPE_CISCO_META:
+                DecodeCiscoMeta(pkt + sizeof(VlanTagHdr),
+                   len - sizeof(VlanTagHdr), p);
+                return;
+
             default:
                 // TBD add decoder drop event for unknown vlan/eth type
                 pc.other++;
@@ -2292,7 +2297,7 @@ static inline int pgm_nak_detect (const uint8_t *data, uint16_t length) {
     }
 
     /* request must be bigger than 44 bytes to cause vuln */
-    if (length <= sizeof(PGM_HEADER)) {
+    if (length <= sizeof(PGM_HEADER) || (length % 4) != 0) {
         return PGM_NAK_ERR;
     }
 
@@ -3924,9 +3929,6 @@ void DecodeIPV6(const uint8_t *pkt, uint32_t len, Packet *p)
         else
         {
             p->encapsulated = 1;
-            p->outer_iph = p->iph;
-            p->outer_ip_data = p->ip_data;
-            p->outer_ip_dsize = p->ip_dsize;
         }
     }
     payload_len = ntohs(hdr->ip6plen) + IP6_HDR_LEN;
@@ -3958,7 +3960,12 @@ void DecodeIPV6(const uint8_t *pkt, uint32_t len, Packet *p)
     {
         goto decodeipv6_fail;
     }
-
+    if (p->encapsulated)
+    {
+       p->outer_iph = p->iph;
+       p->outer_ip_data = p->ip_data;
+       p->outer_ip_dsize = p->ip_dsize;
+    }
     /* lay the IP struct over the raw data */
     // this is ugly but necessary to keep the rest of the code happy
     p->inner_iph = p->iph = (IPHdr *)pkt;
@@ -5540,9 +5547,9 @@ void DecodeTCP(const uint8_t * pkt, const uint32_t len, Packet * p)
         {
             if( Event_Enabled(DECODE_DOS_NAPTHA) )
             {
-                if( p->tcph->th_seq == 6060842 )
+                if( ntohl(p->tcph->th_seq) == 6060842 )
                 {
-                    if( GET_IPH_ID(p) == 413 )
+                    if( ntohs(GET_IPH_ID(p)) == 413 )
                     {
                         DecoderEvent(p, DECODE_DOS_NAPTHA,
                                         DECODE_DOS_NAPTHA_STR, 1, 1);

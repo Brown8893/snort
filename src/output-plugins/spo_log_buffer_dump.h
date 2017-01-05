@@ -1,6 +1,9 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
-** Copyright (C) 2005-2013 Sourcefire, Inc.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2002-2013 Sourcefire, Inc.
+** Copyright (C) 1998-2002 Martin Roesch <roesch@sourcefire.com>
+**
+** Author:   Rahul Burman <rahburma@cisco.com>
 **
 ** This program is free software; you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License Version 2 as
@@ -18,13 +21,14 @@
 ** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+/* $Id$ */
 
-#ifndef __SERVICE_SMTP_H__
-#define __SERVICE_SMTP_H__
 
-#include "service_api.h"
+#ifndef __SPO_LOG_BUFFER_DUMP_H__
+#define __SPO_LOG_BUFFER_DUMP_H__
 
-extern tRNAServiceValidationModule smtp_service_mod;
+#ifdef DUMP_BUFFER
+void LogBufferDumpSetup(void);
+#endif
 
-#endif  /* __SERVICE_SMTP_H__ */
-
+#endif  /* __SPO_LOG_BUFFER_DUMP_H__ */

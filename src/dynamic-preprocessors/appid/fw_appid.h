@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -70,7 +70,7 @@ void AppIdAddDnsResponseInfo(tAppIdData *flow,
 void AppIdResetDnsInfo(tAppIdData *flow);
 
 void AppIdAddPayload(tAppIdData *flow, tAppId payload_id);
-tAppIdData* appSharedDataAlloc(uint8_t proto, sfaddr_t *ip);
+tAppIdData* appSharedDataAlloc(uint8_t proto, struct in6_addr *ip, uint16_t initiator_port);
 tAppId getOpenAppId(void *ssnptr);
 
 void appSetServiceValidator(RNAServiceValidationFCN fcn, tAppId appId, unsigned extractsInfo, tAppIdConfig *pConfig);
@@ -168,7 +168,7 @@ static inline int TPIsAppIdAvailable(void * tpSession)
 
 static inline tAppId isAppDetectionDone(tAppIdData *flow)
 {
-    return getAppIdExtFlag(flow, APPID_SESSION_SERVICE_DETECTED);
+    return getAppIdFlag(flow, APPID_SESSION_SERVICE_DETECTED);
 }
 
 static inline tAppId pickServiceAppId(tAppIdData *flow)
@@ -178,7 +178,7 @@ static inline tAppId pickServiceAppId(tAppIdData *flow)
     if (!flow || flow->common.fsf_type.flow_type != APPID_SESSION_TYPE_NORMAL)
         return APP_ID_NONE;
 
-    if (getAppIdExtFlag(flow, APPID_SESSION_SERVICE_DETECTED))
+    if (getAppIdFlag(flow, APPID_SESSION_SERVICE_DETECTED))
     {
         bool deferred = appInfoEntryFlagGet(flow->serviceAppId, APPINFO_FLAG_DEFER, appIdActiveConfigGet()) || appInfoEntryFlagGet(flow->tpAppId, APPINFO_FLAG_DEFER, appIdActiveConfigGet());
 
@@ -253,10 +253,16 @@ static inline tAppId pickPayloadId(tAppIdData *flow)
 {
     if (!flow || flow->common.fsf_type.flow_type != APPID_SESSION_TYPE_NORMAL)
         return APP_ID_NONE;
-    if (flow->payloadAppId > APP_ID_NONE)
-        return flow->payloadAppId;
-    if (flow->tpPayloadAppId > APP_ID_NONE)
+
+    // if we have a deferred payload, just use it.
+    // we are not worried about the APP_ID_UNKNOWN case here
+    if (appInfoEntryFlagGet(flow->tpPayloadAppId, APPINFO_FLAG_DEFER_PAYLOAD, appIdActiveConfigGet()))
         return flow->tpPayloadAppId;
+    else if (flow->payloadAppId > APP_ID_NONE)
+        return flow->payloadAppId;
+    else if (flow->tpPayloadAppId > APP_ID_NONE)
+        return flow->tpPayloadAppId;
+
     return APP_ID_NONE;
 }
 
@@ -318,7 +324,7 @@ static inline tAppIdData* appSharedGetData(const SFSnortPacket *p)
 
 static inline unsigned int isFwSessionSslDecrypted(tAppIdData *session)
 {
-    return getAppIdExtFlag(session, APPID_SESSION_DECRYPTED);
+    return getAppIdFlag(session, APPID_SESSION_DECRYPTED);
 }
 static inline int testSSLAppIdForReinspect (tAppId app_id)
 {

@@ -1,6 +1,6 @@
 /* $Id$ */
 /*
- ** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ ** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  ** Copyright (C) 2004-2013 Sourcefire, Inc.
  **
  ** This program is free software; you can redistribute it and/or modify
@@ -78,6 +78,10 @@
 #ifdef TARGET_BASED
 extern int16_t ftp_data_app_id;
 extern unsigned s_ftpdata_eof_cb_id;
+#endif
+
+#ifdef DUMP_BUFFER
+#include "ftptelnet_buffer_dump.h"
 #endif
 
 #if 0
@@ -1048,11 +1052,27 @@ int initialize_ftp(FTP_SESSION *Session, SFSnortPacket *p, int iMode)
     }
 
     if (iMode == FTPP_SI_CLIENT_MODE)
+    {
         req = &Session->client.request;
+
+#ifdef DUMP_BUFFER
+        dumpBuffer(FTP_REQUEST_CMD_LINE,req->cmd_line,req->cmd_line_size);
+        dumpBuffer(FTP_REQUEST_CMD,req->cmd_begin,req->cmd_size);
+        dumpBuffer(FTP_REQUEST_PARAM,req->param_begin,req->param_size);
+#endif
+
+    }
     else if (iMode == FTPP_SI_SERVER_MODE)
     {
         FTP_SERVER_RSP *rsp = &Session->server.response;
         req = (FTP_CLIENT_REQ *)rsp;
+
+#ifdef DUMP_BUFFER
+        dumpBuffer(FTP_RESPONSE_LINE,rsp->rsp_line,rsp->rsp_line_size);
+        dumpBuffer(FTP_RESPONSE_DUMP,rsp->rsp_begin,rsp->rsp_size);
+        dumpBuffer(FTP_RESPONSE_MSG,rsp->msg_begin,rsp->msg_size);
+#endif
+
     }
     else
         return FTPP_INVALID_ARG;
@@ -1863,8 +1883,11 @@ int check_ftp(FTP_SESSION  *ftpssn, SFSnortPacket *p, int iMode)
                     if ((req->param_begin != NULL) && (req->param_size > 0))
                     {
                         char *return_ptr = 0;
+			unsigned long offset = 0;
+
                         errno = 0;
-                        unsigned long offset = strtoul(req->param_begin, &return_ptr, 10);
+                        offset = strtoul(req->param_begin, &return_ptr, 10);
+
                         if ((errno == ERANGE || errno == EINVAL) || (offset > 0))
                         {
                             ftpssn->data_chan_state |= DATA_CHAN_REST_CMD_ISSUED;

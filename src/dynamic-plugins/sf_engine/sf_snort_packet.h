@@ -16,7 +16,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * Author: Steve Sturges
@@ -480,6 +480,23 @@ typedef struct _MplsHdr
     uint8_t  ttl;
 } MplsHdr;
 
+typedef struct _H2PriSpec
+{
+    uint32_t stream_id;
+    uint32_t weight;
+    uint8_t  exclusive;
+} H2PriSpec;
+
+typedef struct _H2Hdr
+{
+    uint32_t length;
+    uint32_t stream_id;
+    uint8_t  type;
+    uint8_t  flags;
+    uint8_t  reserved;
+    H2PriSpec pri;
+} H2Hdr;
+
 #define MAX_PROTO_LAYERS 32
 
 typedef struct {
@@ -543,7 +560,7 @@ typedef struct _SFSnortPacket
 
     PreprocEnableMask preprocessor_bit_mask;
 
-    uint32_t flags;
+    uint64_t flags;
 
     uint32_t xtradata_mask;
 
@@ -630,6 +647,7 @@ typedef struct _SFSnortPacket
     IP6Hdr outer_ip6h, outer_orig_ip6h;
 
     MplsHdr mplsHdr;
+    H2Hdr   *h2Hdr;
 
     PseudoPacketType pseudo_type;
     uint16_t max_payload;
@@ -733,6 +751,8 @@ typedef struct _SFSnortPacket
 #define FLAG_FILE_EVENT_SET          0x20000000
 #define FLAG_EARLY_REASSEMBLY 0x40000000  /* this packet. part of the expected stream, should have stream reassembly set */
 #define FLAG_RETRANSMIT       0x80000000  /* this packet is identified as re-transmitted one */
+#define FLAG_PURGE            0x0100000000 /* Stream will not flush the data */
+
 
 #define FLAG_PDU_FULL (FLAG_PDU_HEAD | FLAG_PDU_TAIL)
 

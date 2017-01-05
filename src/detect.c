@@ -1,7 +1,7 @@
 /* $Id$ */
 /*
 ** Copyright (C) 1998-2002 Martin Roesch <roesch@sourcefire.com>
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2002-2013 Sourcefire, Inc.
 **    Dan Roelker <droelker@sourcefire.com>
 **    Marc Norton <mnorton@sourcefire.com>
@@ -81,6 +81,7 @@ PreprocStats detectPerfStats;
 
 /* #define ITERATIVE_ENGINE */
 
+
 OptTreeNode *otn_tmp = NULL;       /* OptTreeNode temp ptr */
 
 int do_detect;
@@ -139,6 +140,7 @@ static void DispatchPreprocessors( Packet *p, tSfPolicyId policy_id, SnortPolicy
 
         if ( preprocHandlesProto( p, ppn ) && IsPreprocessorEnabled( p, ppn->preproc_bit ) )
             ppn->func( p, ppn->context );
+
 
         if( !alerts_processed && ( p->ips_os_selected || ppn->preproc_id == PP_FW_RULE_ENGINE ) )
             alerts_processed = processDecoderAlertsActionQ( p );
@@ -244,14 +246,54 @@ int Preprocess(Packet * p)
 
     check_tags_flag = 1;
 
+#ifdef DUMP_BUFFER
+    dumped_state = false;
+#endif
+
     PREPROC_PROFILE_START(eventqPerfStats);
     retval = SnortEventqLog(snort_conf->event_queue, p);
+
+#ifdef DUMP_BUFFER
+
+    /* dump_alert_only makes sure that bufferdump happens only when a rule is
+    triggered.
+
+    dumped_state avoids repetition of buffer dump for a packet that has an
+    alert, when --buffer-dump is given as command line option.
+
+    When --buffer-dump is given as command line option, BufferDump output
+    plugin is called for each packet. bdfptr will be NULL for all other output
+    plugins.
+    */
+
+    if (!dump_alert_only && !dumped_state)
+    {
+         OutputFuncNode *idx = LogList;
+
+         while (idx != NULL)
+         {
+             if (idx->bdfptr != NULL)
+                 idx->bdfptr(p, NULL , idx->arg, NULL);
+
+             idx = idx->next;
+         }
+     }
+#endif
+
     SnortEventqReset();
     PREPROC_PROFILE_END(eventqPerfStats);
 
     /* Check for normally closed session */
     if( session_api )
         session_api->check_session_closed(p);
+
+    if( session_api && p->ssnptr &&
+      ( session_api->get_session_flags(p->ssnptr) & SSNFLAG_FREE_APP_DATA) )
+    {
+        SessionControlBlock *scb = ( SessionControlBlock * ) p->ssnptr;
+        session_api->free_application_data(scb);
+        scb->ha_state.session_flags &= ~SSNFLAG_FREE_APP_DATA;
+    }
 
     /*
     ** By checking tagging here, we make sure that we log the

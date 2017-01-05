@@ -1,7 +1,7 @@
 /* $Id$ */
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -195,6 +195,9 @@ static void registerReassemblyPort( char *network, uint16_t port, int reassembly
 static void unregisterReassemblyPort( char *network, uint16_t port, int reassembly_direction );
 static unsigned StreamRegisterHandler(Stream_Callback);
 static bool StreamSetHandler(void* ssnptr, unsigned id, Stream_Event);
+static void StreamSetProtoFlags(void* ssnptr, uint32_t flags);
+static void StreamUnsetProtoFlags(void* ssnptr, uint32_t flags);
+static uint32_t StreamGetProtoFlags( void *ssnptr);
 static void StreamResetPolicy(void* ssnptr, int dir, uint16_t policy, uint16_t mss);
 static void StreamSetSessionDecrypted(void* ssnptr, bool enable);
 static bool StreamIsSessionDecrypted(void* ssnptr);
@@ -214,6 +217,14 @@ static int RegisterHttpHeaderCallback (Http_Processor_Callback cb);
 
 static bool serviceEventPublish(unsigned int preprocId, void *ssnptr, ServiceEventType eventType, void * eventData);
 static bool serviceEventSubscribe(unsigned int preprocId, ServiceEventType eventType, ServiceEventNotifierFunc cb);
+static void StreamRegisterPAFFree(uint8_t id, PAF_Free_Callback cb);
+static Packet* getWirePacket();
+static uint8_t getFlushPolicyDir();
+static bool StreamIsSessionHttp2(void* ssnptr);
+static void StreamSetSessionHttp2(void* ssnptr);
+static bool StreamShowRebuiltPackets();
+static bool StreamIsSessionHttp2Upg(void* ssnptr);
+static void StreamSetSessionHttp2Upg(void* ssnptr);
 
 StreamAPI s5api = {
     /* .version = */ STREAM_API_VERSION5,
@@ -272,7 +283,18 @@ StreamAPI s5api = {
     /* .register_http_header_callback = */ RegisterHttpHeaderCallback,
 #endif /* defined(FEAT_OPEN_APPID) */
     /* .service_event_publish */ serviceEventPublish,
-    /* .service_event_subscribe */ serviceEventSubscribe
+    /* .service_event_subscribe */ serviceEventSubscribe,
+    /* .register_paf_free */ StreamRegisterPAFFree,
+    /* .get_wire_packet */ getWirePacket,
+    /* .get_flush_policy_dir */ getFlushPolicyDir,
+    /* .is_session_http2 */ StreamIsSessionHttp2,
+    /* .set_session_http2 */ StreamSetSessionHttp2,
+    /* .is_show_rebuilt_packets_enabled */ StreamShowRebuiltPackets,
+    /* .is_session_http2_upg */ StreamIsSessionHttp2Upg,
+    /* .set_session_http2_upg */ StreamSetSessionHttp2Upg,
+    /* .set_proto_flags */ StreamSetProtoFlags,
+    /* .unset_proto_flags */ StreamUnsetProtoFlags,
+    /* .get_proto_flags */ StreamGetProtoFlags
 
 };
 
@@ -753,12 +775,6 @@ void StreamProcess(Packet *p, void *context)
     if (!firstPacketTime)
         firstPacketTime = p->pkth->ts.tv_sec;
 
-    if(!IsEligible(p))
-    {
-        DEBUG_WRAP(DebugMessage(DEBUG_STREAM_STATE, "Is not eligible!\n"););
-        return;
-    }
-
     DEBUG_WRAP(DebugMessage(DEBUG_STREAM_STATE,
                 "++++++++++++++++++++++++++++++++++++++++++++++++++++++\n"););
     DEBUG_WRAP(DebugMessage(DEBUG_STREAM_STATE, "In Stream!\n"););
@@ -772,8 +788,8 @@ void StreamProcess(Packet *p, void *context)
         return;
     }
 
-   stream_session_config = scb->session_config;
-    if( scb->stream_config == NULL )
+    stream_session_config = scb->session_config;
+    if( scb->stream_config_stale || scb->stream_config == NULL )
     {
         scb->stream_config = sfPolicyUserDataGet( stream_online_config, getNapRuntimePolicy() );
         if( scb->stream_config == NULL )
@@ -781,7 +797,19 @@ void StreamProcess(Packet *p, void *context)
             ErrorMessage("Stream Configuration is NULL, Stream Packet Processing Terminated.\n");
             return;
         }
+        else
+        {
+            scb->proto_policy = NULL;
+            scb->stream_config_stale = false;
+        }
     }
+
+    if(!IsEligible(p))
+    {
+        DEBUG_WRAP(DebugMessage(DEBUG_STREAM_STATE, "Is not eligible!\n"););
+        return;
+    }
+
 #ifdef MPLS
    if(scb->clientMplsHeader != NULL && scb->serverMplsHeader != NULL )
    {
@@ -1567,6 +1595,30 @@ static bool StreamSetHandler( void* ssnptr, unsigned id, Stream_Event se )
     return true;
 }
 
+static void StreamSetProtoFlags( void* ssnptr, uint32_t flags )
+{
+    SessionControlBlock *scb = ( SessionControlBlock * ) ssnptr;
+    scb->proto_flags |= flags;
+    return;
+}
+
+static void StreamUnsetProtoFlags( void* ssnptr, uint32_t flags )
+{
+    SessionControlBlock *scb = ( SessionControlBlock * ) ssnptr;
+    scb->proto_flags &= ~flags;
+    return;
+}
+
+static uint32_t StreamGetProtoFlags( void *ssnptr)
+{
+    SessionControlBlock *scb = ( SessionControlBlock * ) ssnptr;
+    if( scb )
+        return scb->proto_flags;
+
+    return 0;
+
+}
+
 #if defined(FEAT_OPEN_APPID)
 static void SetApplicationId(void* ssnptr, int16_t serviceAppId, int16_t clientAppId,
         int16_t payloadAppId, int16_t miscAppId)
@@ -1832,4 +1884,70 @@ static void StreamReloadSwapFree( void *data )
 }
 
 #endif
+
+static void StreamRegisterPAFFree(uint8_t id, PAF_Free_Callback cb)
+{
+    s5_paf_register_free(id, cb);
+}
+
+static Packet* getWirePacket()
+{
+    return getWirePacketTcp();
+}
+
+static uint8_t getFlushPolicyDir()
+{
+    return getFlushPolicyDirTcp();
+}
+
+static bool StreamIsSessionHttp2( void *ssnptr )
+{
+    SessionControlBlock *ssn;
+
+    if(ssnptr)
+    {    
+        ssn = (SessionControlBlock *)ssnptr;
+        if (ssn->protocol == IPPROTO_TCP )
+            return StreamIsSessionHttp2Tcp( ssnptr );
+        else 
+            return false;
+    }    
+    else 
+        return false;
+}
+static void StreamSetSessionHttp2( void *ssnptr)
+{
+    if( ssnptr )
+        StreamSetSessionHttp2Tcp( ssnptr );
+
+    return;
+}
+
+static bool StreamShowRebuiltPackets()
+{
+    return (stream_session_config->flags & STREAM_CONFIG_SHOW_PACKETS);
+}
+
+static bool StreamIsSessionHttp2Upg( void *ssnptr )
+{
+    SessionControlBlock *ssn;
+
+    if(ssnptr)
+    {
+        ssn = (SessionControlBlock *)ssnptr;
+        if (ssn->protocol == IPPROTO_TCP )
+            return StreamIsSessionHttp2UpgTcp( ssnptr );
+        else
+            return false;
+    }
+    else
+        return false;
+}
+static void StreamSetSessionHttp2Upg( void *ssnptr)
+{
+    if( ssnptr )
+        StreamSetSessionHttp2UpgTcp( ssnptr );
+
+    return;
+}
 

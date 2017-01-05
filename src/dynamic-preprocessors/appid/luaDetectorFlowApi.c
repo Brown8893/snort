@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -34,7 +34,7 @@
 /*static const char * LuaLogLabel = "luaDetectorFlowApi"; */
 
 /* Lua flag bit/index to C flag value (0 for invalid). */
-static const uint32_t FLAGS_TABLE_LUA_TO_C[32] = {
+static const uint64_t FLAGS_TABLE_LUA_TO_C[32] = {
     0,                                /*  0 */
     0,                                /*  1 */
     0,                                /*  2 */
@@ -70,7 +70,7 @@ static const uint32_t FLAGS_TABLE_LUA_TO_C[32] = {
 };
 
 /* C flag bit/index to Lua flag value (0 for invalid). */
-static const uint32_t FLAGS_TABLE_C_TO_LUA[32] = {
+static const uint64_t FLAGS_TABLE_C_TO_LUA[32] = {
         0,             /*  0 */
         0,             /*  1 */
         0,             /*  2 */
@@ -106,11 +106,11 @@ static const uint32_t FLAGS_TABLE_C_TO_LUA[32] = {
 };
 
 /* Convert flag bits used by the Lua code into what the C code uses. */
-static inline uint32_t ConvertFlagsLuaToC(uint32_t in)
+static inline uint64_t ConvertFlagsLuaToC(uint64_t in)
 {
-    uint32_t out = 0;
+    uint64_t out = 0;
     unsigned i;
-    uint32_t msk;
+    uint64_t msk;
 
     msk = 1;
     for (i = 0; i < 32; i++)
@@ -124,11 +124,11 @@ static inline uint32_t ConvertFlagsLuaToC(uint32_t in)
 }
 
 /* Convert flag bits used by the C code into what the Lua code uses. */
-static inline uint32_t ConvertFlagsCToLua(uint32_t in)
+static inline uint64_t ConvertFlagsCToLua(uint64_t in)
 {
-    uint32_t out = 0;
+    uint64_t out = 0;
     unsigned i;
-    uint32_t msk;
+    uint64_t msk;
 
     msk = 1;
     for (i = 0; i < 32; i++)
@@ -346,7 +346,7 @@ static int DetectorFlow_setFlowFlag(
         )
 {
     DetectorFlowUserData *pLuaData;
-    uint32_t flags;
+    uint64_t flags;
 
     pLuaData = checkDetectorFlowUserData(L, 1);
     if (!pLuaData || !pLuaData->pDetectorFlow)
@@ -357,7 +357,7 @@ static int DetectorFlow_setFlowFlag(
     flags = lua_tonumber(L, 2);
     flags = ConvertFlagsLuaToC(flags);
 
-    setAppIdExtFlag(pLuaData->pDetectorFlow->pFlow, flags);
+    setAppIdFlag(pLuaData->pDetectorFlow->pFlow, flags);
 
     return 0;
 }
@@ -375,8 +375,8 @@ static int DetectorFlow_getFlowFlag(
         )
 {
     DetectorFlowUserData *pLuaData;
-    uint32_t flags;
-    uint32_t ret;
+    uint64_t flags;
+    uint64_t ret;
 
     pLuaData = checkDetectorFlowUserData(L, 1);
     if (!pLuaData || !pLuaData->pDetectorFlow)
@@ -388,7 +388,7 @@ static int DetectorFlow_getFlowFlag(
     flags = lua_tonumber(L, 2);
     flags = ConvertFlagsLuaToC(flags);
 
-    ret = getAppIdExtFlag(pLuaData->pDetectorFlow->pFlow, flags);
+    ret = getAppIdFlag(pLuaData->pDetectorFlow->pFlow, flags);
     ret = ConvertFlagsCToLua(ret);
     lua_pushnumber(L, ret);
 
@@ -407,7 +407,7 @@ static int DetectorFlow_clearFlowFlag(
         )
 {
     DetectorFlowUserData *pLuaData;
-    uint32_t flags;
+    uint64_t flags;
 
     pLuaData = checkDetectorFlowUserData(L, 1);
     if (!pLuaData || !pLuaData->pDetectorFlow)
@@ -418,7 +418,7 @@ static int DetectorFlow_clearFlowFlag(
     flags = lua_tonumber(L, 2);
     flags = ConvertFlagsLuaToC(flags);
 
-    clearAppIdExtFlag(pLuaData->pDetectorFlow->pFlow, flags);
+    clearAppIdFlag(pLuaData->pDetectorFlow->pFlow, flags);
 
     return 0;
 }

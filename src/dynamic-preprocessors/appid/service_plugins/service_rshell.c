@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -55,7 +55,7 @@ typedef struct _SERVICE_RSHELL_DATA
 } ServiceRSHELLData;
 
 static int rshell_init(const InitServiceAPI * const init_api);
-MakeRNAServiceValidationPrototype(rshell_validate);
+static int rshell_validate(ServiceValidationArgs* args);
 
 static tRNAServiceElement svc_element =
 {
@@ -119,13 +119,20 @@ static void rshell_free_state(void *data)
     }
 }
 
-MakeRNAServiceValidationPrototype(rshell_validate)
+static int rshell_validate(ServiceValidationArgs* args)
 {
     ServiceRSHELLData *rd = NULL;
     ServiceRSHELLData *tmp_rd;
     int i;
     uint32_t port;
     tAppIdData *pf;
+    tAppIdData *flowp = args->flowp;
+    const uint8_t *data = args->data;
+    SFSnortPacket *pkt = args->pkt; 
+    const int dir = args->dir;
+    uint16_t size = args->size;
+    bool app_id_debug_session_flag = args->app_id_debug_session_flag;
+    char* app_id_debug_session = args->app_id_debug_session;
 
     rd = rshell_service_mod.api->data_get(flowp, rshell_service_mod.flow_data_index);
     if (!rd)
@@ -142,6 +149,9 @@ MakeRNAServiceValidationPrototype(rshell_validate)
         }
         rd->state = RSHELL_STATE_PORT;
     }
+
+    if (app_id_debug_session_flag)
+        _dpd.logMsg("AppIdDbg %s rshell state %d\n", app_id_debug_session, rd->state);
 
     switch (rd->state)
     {
@@ -172,7 +182,6 @@ MakeRNAServiceValidationPrototype(rshell_validate)
             pf = rshell_service_mod.api->flow_new(flowp, pkt, dip, 0, sip, (uint16_t)port, IPPROTO_TCP, app_id, APPID_EARLY_SESSION_FLAG_FW_RULE);
             if (pf)
             {
-                setAppIdExtFlag(pf, APPID_SESSION_IGNORE_HOST | APPID_SESSION_NOT_A_SERVICE);
                 pf->rnaClientState = RNA_STATE_FINISHED;
                 if (rshell_service_mod.api->data_add(pf, tmp_rd, rshell_service_mod.flow_data_index, &rshell_free_state))
                 {
@@ -187,6 +196,15 @@ MakeRNAServiceValidationPrototype(rshell_validate)
                     tmp_rd->parent = NULL;
                     return SERVICE_ENOMEM;
                 }
+                pf->scan_flags |= SCAN_HOST_PORT_FLAG;
+                PopulateExpectedFlow(flowp, pf,
+                                     APPID_SESSION_CONTINUE |
+                                     APPID_SESSION_REXEC_STDERR |
+                                     APPID_SESSION_NO_TPI |
+                                     APPID_SESSION_SERVICE_DETECTED |
+                                     APPID_SESSION_NOT_A_SERVICE |
+                                     APPID_SESSION_PORT_SERVICE_DONE);
+                pf->rnaServiceState = RNA_STATE_STATEFUL;
             }
             else
             {
@@ -271,7 +289,7 @@ MakeRNAServiceValidationPrototype(rshell_validate)
     case RSHELL_STATE_STDERR_CONNECT_SYN_ACK:
         if (rd->parent && rd->parent->state == RSHELL_STATE_SERVER_CONNECT)
             rd->parent->state = RSHELL_STATE_USERNAME;
-        setAppIdExtFlag(flowp, APPID_SESSION_SERVICE_DETECTED);
+        setAppIdFlag(flowp, APPID_SESSION_SERVICE_DETECTED);
         return SERVICE_SUCCESS;
     default:
         goto bail;
@@ -287,11 +305,13 @@ success:
     return SERVICE_SUCCESS;
 
 bail:
-    rshell_service_mod.api->incompatible_data(flowp, pkt, dir, &svc_element, rshell_service_mod.flow_data_index, pConfig);
+    rshell_service_mod.api->incompatible_data(flowp, pkt, dir, &svc_element,
+                                              rshell_service_mod.flow_data_index, args->pConfig);
     return SERVICE_NOT_COMPATIBLE;
 
 fail:
-    rshell_service_mod.api->fail_service(flowp, pkt, dir, &svc_element, rshell_service_mod.flow_data_index, pConfig);
+    rshell_service_mod.api->fail_service(flowp, pkt, dir, &svc_element,
+                                         rshell_service_mod.flow_data_index, args->pConfig);
     return SERVICE_NOMATCH;
 }
 

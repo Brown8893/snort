@@ -1,6 +1,6 @@
 /* $Id$ */
 /*
- ** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ ** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  ** Copyright (C) 2010-2013 Sourcefire, Inc.
  **
  ** This program is free software; you can redistribute it and/or modify
@@ -343,6 +343,10 @@ static void Parse_TCP (NormalizerContext* pc, char* args)
             else if ( !strcasecmp(toks[i], "ips") )
             {
                 Norm_Enable(pc, NORM_TCP_IPS);
+            }
+            else if ( !strcasecmp(toks[i], "ftp") )
+            {
+                Norm_Enable(pc, NORM_FTP_DATA);
             }
             else if ( !strcasecmp(toks[i], "trim_syn") )
             {

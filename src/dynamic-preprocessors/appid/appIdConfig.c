@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -68,7 +68,7 @@ void appIdConfigParse(char *args)
 
         if(!strcasecmp(stoks[0], "conf"))
         {
-            if (!stoks[1] || strlen(stoks[1]) >= sizeof(appidStaticConfig.conf_file))
+            if ((s_toks != 2) || strlen(stoks[1]) >= sizeof(appidStaticConfig.conf_file))
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid rna_conf");
             }
@@ -77,7 +77,7 @@ void appIdConfigParse(char *args)
         }
         else if(!strcasecmp(stoks[0], "debug"))
         {
-            if (!stoks[1])
+            if (s_toks != 2)
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid debug");
             }
@@ -86,7 +86,7 @@ void appIdConfigParse(char *args)
         }
         else if(!strcasecmp(stoks[0], "dump_ports"))
         {
-            if (stoks[1])
+            if (s_toks > 1)
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid dump ports specified");
             }
@@ -94,7 +94,7 @@ void appIdConfigParse(char *args)
         }
         else if(!strcasecmp(stoks[0], "memcap"))
         {
-            if (!stoks[1])
+            if (s_toks != 2)
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid memcap");
             }
@@ -110,7 +110,7 @@ void appIdConfigParse(char *args)
         }
         else if(!strcasecmp(stoks[0], "app_stats_filename"))
         {
-            if (!stoks[1] || strlen(stoks[1]) >= sizeof(appidStaticConfig.app_stats_filename))
+            if ((s_toks != 2) || strlen(stoks[1]) >= sizeof(appidStaticConfig.app_stats_filename))
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid stats_filename");
             }
@@ -119,7 +119,7 @@ void appIdConfigParse(char *args)
         }
         else if(!strcasecmp(stoks[0], "app_stats_period"))
         {
-            if (!stoks[1])
+            if (s_toks != 2)
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid app_stats_period");
             }
@@ -132,7 +132,7 @@ void appIdConfigParse(char *args)
         }
         else if(!strcasecmp(stoks[0], "app_stats_rollover_size"))
         {
-            if (!stoks[1])
+            if (s_toks != 2)
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid app_stats_rollover_size");
             }
@@ -145,7 +145,7 @@ void appIdConfigParse(char *args)
         }
         else if(!strcasecmp(stoks[0], "app_stats_rollover_time"))
         {
-            if (!stoks[1])
+            if (s_toks != 2)
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid app_stats_rollover_time");
             }
@@ -158,16 +158,16 @@ void appIdConfigParse(char *args)
         }
         else if(!strcasecmp(stoks[0], "app_detector_dir"))
         {
-            if (!stoks[1] || strlen(stoks[1]) >= sizeof(appidStaticConfig.app_id_detector_path))
+            if ((s_toks != 2) || strlen(stoks[1]) >= sizeof(appidStaticConfig.app_id_detector_path))
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid app_detector_dir");
             }
 
             snprintf(appidStaticConfig.app_id_detector_path, sizeof(appidStaticConfig.app_id_detector_path), "%s", stoks[1]);
         }
-       else if(!strcasecmp(stoks[0], "instance_id"))
+        else if(!strcasecmp(stoks[0], "instance_id"))
         {
-            if (!stoks[1])
+            if (s_toks != 2)
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid instance id");
             }
@@ -184,7 +184,7 @@ void appIdConfigParse(char *args)
                 free((void *)appidStaticConfig.appid_thirdparty_dir);
                 appidStaticConfig.appid_thirdparty_dir = NULL;
             }
-            if (!stoks[1])
+            if (s_toks != 2)
             {
                 _dpd.fatalMsg("%s(%d) => %s\n", *(_dpd.config_file), *(_dpd.config_line), "Invalid ThirdpartyDirectory");
             }

@@ -1,7 +1,7 @@
 /* $Id */
 
 /*
- ** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ ** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  ** Copyright (C) 2011-2013 Sourcefire, Inc.
  **
  **
@@ -66,6 +66,10 @@ PreprocStats sipPerfStats;
 #endif
 
 #include "sf_types.h"
+
+#ifdef DUMP_BUFFER
+#include "sip_buffer_dump.h"
+#endif
 
 const int MAJOR_VERSION = 1;
 const int MINOR_VERSION = 1;
@@ -140,6 +144,9 @@ void SetupSIP(void)
 #else
     _dpd.registerPreproc("sip", SIPInit, SIPReload,
             SIPReloadVerify, SIPReloadSwap, SIPReloadSwapFree);
+#endif
+#ifdef DUMP_BUFFER
+    _dpd.registerBufferTracer(getSIPBuffers, SIP_BUFFER_DUMP_FUNC);
 #endif
 }
 
@@ -241,6 +248,8 @@ static inline void SIP_overloadURI(SFSnortPacket *p, SIPMsg *sipMsg)
     if ( sipMsg->body_data )
         _dpd.setHttpBuffer(HTTP_BUFFER_CLIENT_BODY, sipMsg->body_data, sipMsg->bodyLen);
 }
+
+
 /*********************************************************************
  * Main entry point for SIP processing.
  *
@@ -261,10 +270,12 @@ static inline int SIP_Process(SFSnortPacket *p, SIPData* sessp)
 
     memset(&sipMsg, 0, SIPMSG_ZERO_LEN);
 
+
     /*Input parameters*/
     sipMsg.isTcp = IsTCP(p);
 
     end =  sip_buff + p->payload_size;
+
 
     status = sip_parse(&sipMsg, sip_buff, end);
 
@@ -282,6 +293,7 @@ static inline int SIP_Process(SFSnortPacket *p, SIPData* sessp)
     pRopts->body_len = sipMsg.bodyLen;
     pRopts->body_data = sipMsg.body_data;
     pRopts->status_code = sipMsg.status_code;
+
 
     DEBUG_WRAP(DebugMessage(DEBUG_SIP, "SIP message header length: %d\n",
             sipMsg.headerLen));

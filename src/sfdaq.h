@@ -1,7 +1,7 @@
 /* $Id$ */
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -91,8 +91,18 @@ int DAQ_QueryFlow(const DAQ_PktHdr_t *hdr, DAQ_QueryFlow_t* query);
 #endif
 #endif
 #ifdef HAVE_DAQ_DP_ADD_DC
+
+typedef struct _DAQ_DC_Params
+{
+    unsigned flags;
+    unsigned timeout_ms;
+} DAQ_DC_Params;
+#define DAQ_DC_FLOAT            0x01
+#define DAQ_DC_ALLOW_MULTIPLE   0x02
+#define DAQ_DC_PERSIST          0x04
 void DAQ_Add_Dynamic_Protocol_Channel(const Packet *ctrlPkt, sfaddr_t* cliIP, uint16_t cliPort,
-                                    sfaddr_t* srvIP, uint16_t srvPort, uint8_t protocol );
+                                      sfaddr_t* srvIP, uint16_t srvPort, uint8_t protocol,
+                                      DAQ_DC_Params* params);
 #endif
 
 #ifdef HAVE_DAQ_ADDRESS_SPACE_ID

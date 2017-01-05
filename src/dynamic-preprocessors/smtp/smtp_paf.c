@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -391,7 +391,7 @@ static inline PAF_Status smtp_paf_client(SmtpPafData *pfdata,
 
 /* Main PAF function*/
 static PAF_Status smtp_paf_eval(void* ssn, void** ps, const uint8_t* data,
-        uint32_t len, uint32_t flags, uint32_t* fp)
+        uint32_t len, uint64_t *flags, uint32_t* fp, uint32_t* fp_eoh)
 {
     SmtpPafData *pfdata = *(SmtpPafData **)ps;
 
@@ -413,7 +413,7 @@ static PAF_Status smtp_paf_eval(void* ssn, void** ps, const uint8_t* data,
     }
 
     /*From server side (responses)*/
-    if (flags & FLAG_FROM_SERVER)
+    if (*flags & FLAG_FROM_SERVER)
     {
         DEBUG_WRAP(DebugMessage(DEBUG_SMTP, "From server!\n"););
         return smtp_paf_server(pfdata, data, len, fp);

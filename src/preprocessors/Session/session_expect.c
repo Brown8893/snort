@@ -1,7 +1,7 @@
 /* $Id$ */
 
 /*
- ** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ ** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  ** Copyright (C) 2005-2013 Sourcefire, Inc.
  ** AUTHOR: Steven Sturges
  **
@@ -425,6 +425,7 @@ int StreamExpectAddChannelPreassignCallback(const Packet *ctrlPkt, sfaddr_t* cli
         data->preprocId = preprocId;
         data->next = NULL;
         data_list = malloc( sizeof( *data_list ) );
+
         if( !data_list )
         {
             free( data );
@@ -457,10 +458,17 @@ int StreamExpectAddChannelPreassignCallback(const Packet *ctrlPkt, sfaddr_t* cli
                     "Adding expected to DAQ\n"););
         // when adding expected channel send expected flow parameters to the DAQ
         // for forwarding to firmware...
-        if( cliPort == UNKNOWN_PORT )
-           DAQ_Add_Dynamic_Protocol_Channel( ctrlPkt, cliIP, cliPort, srvIP, srvPort, protocol );
-        else
-           DAQ_Add_Dynamic_Protocol_Channel( ctrlPkt, srvIP, srvPort, cliIP, cliPort, protocol );
+        {
+            DAQ_DC_Params params;
+
+            memset(&params, 0, sizeof(params));
+            params.flags = 0;
+            params.timeout_ms = 1 * 1000; // 1 second
+            if( cliPort == UNKNOWN_PORT )
+               DAQ_Add_Dynamic_Protocol_Channel( ctrlPkt, cliIP, cliPort, srvIP, srvPort, protocol, &params );
+            else
+               DAQ_Add_Dynamic_Protocol_Channel( ctrlPkt, srvIP, srvPort, cliIP, cliPort, protocol, &params );
+        }
 #endif
 
     }
@@ -713,6 +721,15 @@ char StreamExpectProcessNode(Packet *p, SessionControlBlock* lws, SFXHASH_NODE *
                 && data->appDataFreeFn)
         {
             data->appDataFreeFn(data->appData);
+        }
+
+        if(data->preprocId == PP_FTPTELNET)
+        {
+            if (( Normalize_GetMode(snort_conf, NORM_TCP_IPS) == NORM_MODE_ON ) &&
+                    ( Normalize_GetMode(snort_conf, NORM_FTP_DATA) == NORM_MODE_ON ))
+                stream_api->set_proto_flags(lws, PROTO_FTP_DATA_NORMALIZE);
+            else
+                stream_api->unset_proto_flags(lws, PROTO_FTP_DATA_NORMALIZE);
         }
 
         if(data->cbId != INVALIDCBID)

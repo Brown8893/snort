@@ -1,7 +1,7 @@
 /* $Id$ */
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -821,11 +821,31 @@ int DAQ_QueryFlow(DAQ_PktHdr_t *hdr, DAQ_QueryFlow_t* query)
  * of the expected dynamic channel.
  */
 void DAQ_Add_Dynamic_Protocol_Channel(const Packet *ctrlPkt, sfaddr_t* cliIP, uint16_t cliPort,
-                                    sfaddr_t* srvIP, uint16_t srvPort, uint8_t protocol )
+                                      sfaddr_t* srvIP, uint16_t srvPort, uint8_t protocol,
+                                      DAQ_DC_Params* params)
 {
 
     DAQ_DP_key_t dp_key;
-
+#ifdef HAVE_DAQ_DATA_CHANNEL_SEPARATE_IP_VERSIONS
+    dp_key.src_af = sfaddr_family(cliIP);
+    if (AF_INET == dp_key.src_af)
+    {
+        dp_key.sa.src_ip4.s_addr = sfaddr_get_ip4_value(cliIP);
+    }
+    else
+    {
+        memcpy(&dp_key.sa.src_ip6, sfaddr_get_ip6_ptr(cliIP), sizeof(dp_key.sa.src_ip6));
+    }
+    dp_key.dst_af = sfaddr_family(srvIP);
+    if (AF_INET == dp_key.dst_af)
+    {
+        dp_key.da.dst_ip4.s_addr = sfaddr_get_ip4_value(srvIP);
+    }
+    else
+    {
+        memcpy(&dp_key.da.dst_ip6, sfaddr_get_ip6_ptr(srvIP), sizeof(dp_key.da.dst_ip6));
+    }
+#else
     dp_key.af = sfaddr_family(cliIP);
     if( dp_key.af == AF_INET )
     {
@@ -837,6 +857,7 @@ void DAQ_Add_Dynamic_Protocol_Channel(const Packet *ctrlPkt, sfaddr_t* cliIP, ui
         memcpy( &dp_key.sa.src_ip6, sfaddr_get_ip6_ptr(cliIP), sizeof( dp_key.sa.src_ip6 ) );
         memcpy( &dp_key.da.dst_ip6, sfaddr_get_ip6_ptr(srvIP), sizeof( dp_key.da.dst_ip6 ) );
     }
+#endif
 
     dp_key.protocol = protocol;
     dp_key.src_port = cliPort;
@@ -859,6 +880,23 @@ void DAQ_Add_Dynamic_Protocol_Channel(const Packet *ctrlPkt, sfaddr_t* cliIP, ui
         dp_key.tunnel_type = DAQ_DP_TUNNEL_TYPE_NON_TUNNEL;
 
     // notify the firmware to add expected flow for this dynamic channel
+#ifdef HAVE_DAQ_DATA_CHANNEL_PARAMS
+    {
+        DAQ_Data_Channel_Params_t daq_params;
+
+        memset(&daq_params, 0, sizeof(daq_params));
+        daq_params.timeout_ms = params->timeout_ms;
+        if (params->flags & DAQ_DC_FLOAT)
+            daq_params.flags |= DAQ_DATA_CHANNEL_FLOAT; 
+        if (params->flags & DAQ_DC_ALLOW_MULTIPLE)
+            daq_params.flags |= DAQ_DATA_CHANNEL_ALLOW_MULTIPLE;
+        if (params->flags & DAQ_DC_PERSIST)
+            daq_params.flags |= DAQ_DATA_CHANNEL_PERSIST;
+        daq_dp_add_dc(daq_mod, daq_hand, ctrlPkt->pkth, &dp_key, ctrlPkt->pkt,
+                      &daq_params);
+    }
+#else
     daq_dp_add_dc( daq_mod, daq_hand, ctrlPkt->pkth, &dp_key, ctrlPkt->pkt );
+#endif
 }
 #endif

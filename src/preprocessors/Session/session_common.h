@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2004-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -160,6 +160,7 @@ typedef struct _SessionControlBlock
     uint16_t    client_port;
     uint16_t    server_port;
     bool        port_guess;
+    bool        stream_config_stale;
 
     uint8_t     protocol;
 
@@ -185,6 +186,7 @@ typedef struct _SessionControlBlock
     bool    session_established;
     bool    new_session;
     bool    in_oneway_list;
+    bool    is_session_deletion_delayed;
 
     // pointers for linking into list of oneway sessions
     struct _SessionControlBlock *ows_prev;
@@ -199,6 +201,8 @@ typedef struct _SessionControlBlock
    MPLS_Hdr *serverMplsHeader;
 #endif
 
+    uint32_t proto_flags;
+    uint32_t ftp_num_packets_normalized;
 } SessionControlBlock;
 
 

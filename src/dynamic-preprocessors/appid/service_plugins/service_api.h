@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -51,12 +51,20 @@ typedef enum {
     SERVICE_ENOMEM = -12
 } SERVICE_RETCODE;
 
-
-typedef int (*RNAServiceValidationFCN)(const uint8_t *, uint16_t, const int,
-                                       tAppIdData *, SFSnortPacket *, struct _Detector *, const struct appIdConfig_ *);
-#define MakeRNAServiceValidationPrototype(name) static int name(const uint8_t *data, uint16_t size, const int dir, \
-                                                                tAppIdData *flowp, SFSnortPacket *pkt, \
-                                                                struct _Detector *userdata, const struct appIdConfig_ *pConfig)
+typedef struct _ServiceValidationArgs
+{
+    const uint8_t *data;
+    uint16_t size;
+    int dir;
+    tAppIdData *flowp;
+    SFSnortPacket *pkt;
+    struct _Detector *userdata;
+    const struct appIdConfig_ *pConfig;
+    bool app_id_debug_session_flag;
+    char *app_id_debug_session;
+} ServiceValidationArgs;
+typedef int (*RNAServiceValidationFCN)(ServiceValidationArgs*);
+#define MakeRNAServiceValidationPrototype(name) static int name(ServiceValidationArgs* args)
 
 struct _INIT_SERVICE_API;
 

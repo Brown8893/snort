@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2003-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -98,6 +98,11 @@
 #include "sf_email_attach_decode.h"
 #include "file_decomp.h"
 #include "hi_eo_log.h"
+
+#ifdef DUMP_BUFFER
+#include "hi_buffer_dump.h"
+#endif
+
 #ifdef PERF_PROFILING
 extern PreprocStats hiDetectPerfStats;
 extern int hiDetectCalled;
@@ -109,6 +114,7 @@ extern MemPool *hi_gzip_mempool;
 
 extern tSfPolicyUserContextId hi_config;
 
+extern char** xffFields;
 
 /* Stats tracking for HTTP Inspect */
 HIStats hi_stats;
@@ -224,6 +230,7 @@ HISearchInfo hi_search_info;
 
 #define DECOMPRESS_DEFLATE "deflate"
 #define DECOMPRESS_LZMA    "lzma"
+#define LEGACY_MODE        "legacy_mode"
 
 #define MAX_CLIENT_DEPTH 1460
 #define MAX_SERVER_DEPTH 65535
@@ -283,6 +290,7 @@ typedef enum {
     CONFIG_MAX_JS_WS
 } SpaceType;
 
+static char** getHttpXffPrecedence(void* ssn, uint32_t flags, int* nFields);
 
 /*
 **  NAME
@@ -1668,7 +1676,7 @@ static bool Is_Field_Prec_Unique( uint8_t *Name_Array[], uint8_t Prec_Array[],
 {
     int i;
 
-    for( i=0; i<HI_UI_CONFIG_MAX_XFF_FIELD_NAMES; i++ )
+    for( i=0; i<HTTP_MAX_XFF_FIELDS; i++ )
     {
         /* A NULL entry indicates the end of the list */
         if( Name_Array[i] == NULL )
@@ -1697,7 +1705,7 @@ static int Find_Open_Field( uint8_t *Name_Array[] )
 {
     int i;
 
-    for( i=0; i<HI_UI_CONFIG_MAX_XFF_FIELD_NAMES; i++ )
+    for( i=0; i<HTTP_MAX_XFF_FIELDS; i++ )
         if( Name_Array[i] == NULL )
             return( i );
     return( -1 );
@@ -1707,7 +1715,7 @@ static void Push_Down_XFF_List( uint8_t *Name_Array[], uint8_t *Length_Array, ui
 {
     int i;
 
-    for( i=(HI_UI_CONFIG_MAX_XFF_FIELD_NAMES-1); i>=Start; i-- )
+    for( i=(HTTP_MAX_XFF_FIELDS-1); i>=Start; i-- )
     {
         Name_Array[i] = Name_Array[i-1];
         Length_Array[i] = Length_Array[i-1];
@@ -1723,12 +1731,20 @@ static int Add_XFF_Field( HTTPINSPECT_CONF *ServerConf, uint8_t *Prec_Array, uin
 {
     uint8_t **Fields = ServerConf->xff_headers;
     uint8_t *Lengths = ServerConf->xff_header_lengths;
-    size_t Length;
+    size_t Length = 0;
     int i;
     char **Builtin_Fields;
     unsigned char *cp;
     const char *Special_Chars = { "_-" };
+    bool fieldAdded = false;
 
+    if(!Field_Name )
+    {
+        SnortSnprintf(ErrorString, ErrStrLen,
+                      "Field name is null" );
+        return -1;
+    }
+    
     if( (Length = strlen( (char *)Field_Name )) > UINT8_MAX )
     {
         SnortSnprintf(ErrorString, ErrStrLen,
@@ -1752,8 +1768,8 @@ static int Add_XFF_Field( HTTPINSPECT_CONF *ServerConf, uint8_t *Prec_Array, uin
     Builtin_Fields = hi_client_get_field_names();
     for( i=0; Builtin_Fields[i]!=NULL; i++ )
     {
-        if( strcasecmp(Builtin_Fields[i], HI_UI_CONFIG_XFF_FIELD_NAME) == 0 ) continue;
-        if( strcasecmp(Builtin_Fields[i], HI_UI_CONFIG_TCI_FIELD_NAME) == 0 ) continue;
+        if( strcasecmp(Builtin_Fields[i], HTTP_XFF_FIELD_X_FORWARDED_FOR) == 0 ) continue;
+        if( strcasecmp(Builtin_Fields[i], HTTP_XFF_FIELD_TRUE_CLIENT_IP) == 0 ) continue;
         if( strcasecmp(Builtin_Fields[i], (char *)Field_Name) == 0 )
         {
             SnortSnprintf(ErrorString, ErrStrLen,
@@ -1773,32 +1789,49 @@ static int Add_XFF_Field( HTTPINSPECT_CONF *ServerConf, uint8_t *Prec_Array, uin
             Fields[i] = Field_Name;
             Lengths[i] = (uint8_t)Length;
             Prec_Array[i] = 0;
-            return( 0 );
+            fieldAdded = true;
         }
         else
             return( -1 );
     }
-
-    for( i=0; i<HI_UI_CONFIG_MAX_XFF_FIELD_NAMES; i++ )
+    else
     {
-        /* If the space is open, place the name & prec */
-        if( Fields[i] == NULL )
+        for( i=0; i<HTTP_MAX_XFF_FIELDS; i++ )
         {
-            Fields[i] = Field_Name;
-            Lengths[i] = (uint8_t)Length;
-            Prec_Array[i] = Precedence;
-            break;
-        }
+            /* If the space is open, place the name & prec */
+            if( Fields[i] == NULL )
+            {
+                Fields[i] = Field_Name;
+                Lengths[i] = (uint8_t)Length;
+                Prec_Array[i] = Precedence;
+                fieldAdded = true;
+                break;
+            }
 
-        /* if the new entry is higher precedence than the current list element,
-           push the list down and place the new entry here. */
-        if( Precedence < Prec_Array[i] )
+            /* if the new entry is higher precedence than the current list element,
+               push the list down and place the new entry here. */
+            if( Precedence < Prec_Array[i] )
+            {
+                Push_Down_XFF_List( Fields, Lengths, Prec_Array, i+1 );
+                Fields[i] = Field_Name;
+                Lengths[i] = (uint8_t)Length;
+                Prec_Array[i] = Precedence;
+                fieldAdded = true;
+                break;
+            }
+        }
+    }
+
+    if (fieldAdded)
+    {
+        for (i = 0; i < HTTP_MAX_XFF_FIELDS; i++)
         {
-            Push_Down_XFF_List( Fields, Lengths, Prec_Array, i+1 );
-            Fields[i] = Field_Name;
-            Lengths[i] = (uint8_t)Length;
-            Prec_Array[i] = Precedence;
-            break;
+            if (!xffFields[i])
+            {
+                xffFields[i] = SnortStrndup((char *)Field_Name, UINT8_MAX);
+                break;
+            }
+            else if (!strncasecmp(xffFields[i], (char *)Field_Name, UINT8_MAX)) break;
         }
     }
 
@@ -1813,10 +1846,10 @@ static int ProcessXFF_HeaderList(HTTPINSPECT_CONF *ServerConf,
     bool Keep_Parsing;
     bool Have_XFF;
     bool Have_TCI;
-    uint8_t Prec_List[HI_UI_CONFIG_MAX_XFF_FIELD_NAMES];
+    uint8_t Prec_List[HTTP_MAX_XFF_FIELDS];
     unsigned char Count = 0;
-    unsigned char Max_XFF = { (HI_UI_CONFIG_MAX_XFF_FIELD_NAMES-XFF_BUILTIN_NAMES) };
-    uint8_t *Field_Name;
+    unsigned char Max_XFF = { (HTTP_MAX_XFF_FIELDS-HTTP_XFF_BUILTIN_NAMES) };
+    uint8_t *Field_Name=NULL;
     unsigned int Precedence;
     int i;
      uint8_t addXffFieldName = 0;
@@ -1833,7 +1866,7 @@ static int ProcessXFF_HeaderList(HTTPINSPECT_CONF *ServerConf,
         return -1;
     }
 
-    for( i=0; i<HI_UI_CONFIG_MAX_XFF_FIELD_NAMES; i++ ) Prec_List[i] = 0;
+    for( i=0; i<HTTP_MAX_XFF_FIELDS; i++ ) Prec_List[i] = 0;
     Parse_State = XFF_STATE_START;
     Keep_Parsing = true;
 
@@ -1889,12 +1922,12 @@ static int ProcessXFF_HeaderList(HTTPINSPECT_CONF *ServerConf,
                     return( -1 );
                 }
 
-                if( strcasecmp( (char *)Field_Name, HI_UI_CONFIG_XFF_FIELD_NAME) == 0 )
+                if( strcasecmp( (char *)Field_Name, HTTP_XFF_FIELD_X_FORWARDED_FOR) == 0 )
                 {
                     Max_XFF += 1;
                     Have_XFF = true;
                 }
-                else if( strcasecmp( (char *)Field_Name, HI_UI_CONFIG_TCI_FIELD_NAME) == 0 )
+                else if( strcasecmp( (char *)Field_Name, HTTP_XFF_FIELD_TRUE_CLIENT_IP) == 0 )
                 {
                     Max_XFF += 1;
                     Have_TCI = true;
@@ -1962,11 +1995,11 @@ static int ProcessXFF_HeaderList(HTTPINSPECT_CONF *ServerConf,
         return( -1 );
     }
 
-    /* NOTE:  The number of fields added here MUST be represented in XFF_BUILTIN_NAMES value
+    /* NOTE:  The number of fields added here MUST be represented in HTTP_XFF_BUILTIN_NAMES value
               to assure that we reserve room for them on the list. */
     if( !Have_XFF )
     {
-        Field_Name = (uint8_t *)SnortStrdup( HI_UI_CONFIG_XFF_FIELD_NAME );
+        Field_Name = (uint8_t *)SnortStrdup( HTTP_XFF_FIELD_X_FORWARDED_FOR );
         if( Add_XFF_Field( ServerConf, Prec_List, Field_Name, 0,
                            ErrorString, ErrStrLen ) != 0 )
         {
@@ -1980,7 +2013,7 @@ static int ProcessXFF_HeaderList(HTTPINSPECT_CONF *ServerConf,
 
     if( !Have_TCI )
     {
-        Field_Name = (uint8_t *)SnortStrdup( HI_UI_CONFIG_TCI_FIELD_NAME );
+        Field_Name = (uint8_t *)SnortStrdup( HTTP_XFF_FIELD_TRUE_CLIENT_IP );
         if( Add_XFF_Field( ServerConf, Prec_List, Field_Name, 0,
                            ErrorString, ErrStrLen ) != 0 )
         {
@@ -1994,6 +2027,23 @@ static int ProcessXFF_HeaderList(HTTPINSPECT_CONF *ServerConf,
 
 
     return 0;
+}
+
+static char** getHttpXffFields(int* nFields)
+{
+    if (!xffFields[0])
+    {
+        if (nFields) *nFields = 0;
+        return NULL;
+    }
+
+    if (nFields)
+    {
+        for ((*nFields) = 0; ((*nFields) < HTTP_MAX_XFF_FIELDS) && xffFields[*nFields];
+             (*nFields)++)
+            ;
+    }
+    return xffFields;
 }
 
 static int ProcessHttpMethodList(HTTPINSPECT_CONF *ServerConf,
@@ -2539,6 +2589,25 @@ static int ProcessServerConf(HTTPINSPECT_GLOBAL_CONF *GlobalConf,
                     return iRet;
                 }
             }
+            else if (!strcmp(LEGACY_MODE, pcToken))
+            {
+                pcToken = strtok(NULL, CONF_SEPARATORS);
+                if(pcToken ==  NULL)
+                    break;
+
+                if(!strcmp(BOOL_YES, pcToken))
+                {
+                    ServerConf->h2_mode = false;
+                }
+                else if(!strcmp(BOOL_NO, pcToken))
+                {
+                    ServerConf->h2_mode = true;
+                }
+                else
+                {
+                   continue;
+                }
+            }
             else
             {
                 SnortSnprintf(ErrorString, ErrStrLen,
@@ -2552,7 +2621,7 @@ static int ProcessServerConf(HTTPINSPECT_GLOBAL_CONF *GlobalConf,
 #ifdef FILE_DECOMP_PDF
 "'%s', "
 #endif
-                              "'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', and '%s'. ",
+                              "'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', and '%s'. ",
                               PORTS,IIS_UNICODE_MAP, ALLOW_PROXY, FLOW_DEPTH,
                               CLIENT_FLOW_DEPTH, GLOBAL_ALERT, OVERSIZE_DIR, MAX_HDR_LENGTH,
                               INSPECT_URI_ONLY, INSPECT_COOKIES, INSPECT_RESPONSE,
@@ -2564,7 +2633,7 @@ INSPECT_SWF,
 INSPECT_PDF,
 #endif
                               NORMALIZE_HEADERS, NORMALIZE_UTF, UNLIMIT_DECOMPRESS, HTTP_METHODS,
-                              LOG_URI, LOG_HOSTNAME, MAX_SPACES, NORMALIZE_JS, MAX_JS_WS);
+                              LOG_URI, LOG_HOSTNAME, MAX_SPACES, NORMALIZE_JS, MAX_JS_WS, LEGACY_MODE);
 
                 return -1;
             }
@@ -3019,6 +3088,25 @@ INSPECT_PDF,
         {
             ServerConf->log_hostname = 1;
         }
+        else if (!strcmp(LEGACY_MODE, pcToken))
+        {
+            pcToken = strtok(NULL, CONF_SEPARATORS);
+            if(pcToken ==  NULL)
+                break;
+
+            if(!strcmp(BOOL_YES, pcToken))
+            {
+                ServerConf->h2_mode = false;
+            }
+            else if(!strcmp(BOOL_NO, pcToken))
+            {
+                ServerConf->h2_mode = true;
+            }
+            else
+            {
+               continue;
+            }
+        }
         else
         {
             SnortSnprintf(ErrorString, ErrStrLen,
@@ -3225,6 +3313,9 @@ static int PrintServerConf(HTTPINSPECT_CONF *ServerConf)
     }
 
     LogMessage("%s\n", buf);
+
+    LogMessage("      Legacy mode: %s\n",
+               ServerConf->h2_mode ? "NO" : "YES");
 
     return 0;
 }
@@ -3919,7 +4010,8 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
 
     PROFILE_VARS;
 
-    hi_stats.total++;
+    if(!(stream_api->get_proto_flags(p->ssnptr) & PROTO_HTTP_PAF_FLUSH_POST_HDR))
+        hi_stats.total++;
 
     /*
     **  Set up the HI_SI_INPUT pointer.  This is what the session_inspection()
@@ -4110,7 +4202,10 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
         {
             const HttpBuffer* hb;
             ClearHttpBuffers();  // FIXTHIS needed here and right above??
-
+#ifdef DUMP_BUFFER
+            clearReqBuffers();
+	    clearRespBuffers();
+#endif
             if ( Session->client.request.uri_norm )
             {
                 SetHttpBufferEncoding(
@@ -4125,6 +4220,10 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                     Session->client.request.uri_size);
 
                 p->packet_flags |= PKT_HTTP_DECODE;
+#ifdef DUMP_BUFFER
+		dumpBuffer(URI_DUMP, Session->client.request.uri_norm, Session->client.request.uri_norm_size);
+#endif
+
             }
             else if ( Session->client.request.uri )
             {
@@ -4140,6 +4239,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                     Session->client.request.uri_size);
 
                 p->packet_flags |= PKT_HTTP_DECODE;
+#ifdef DUMP_BUFFER
+		dumpBuffer(RAW_URI_DUMP, Session->client.request.uri, Session->client.request.uri_size);
+#endif
             }
 
             if ( Session->client.request.header_norm ||
@@ -4159,6 +4261,10 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                         Session->client.request.header_raw_size);
 
                     p->packet_flags |= PKT_HTTP_DECODE;
+#ifdef DUMP_BUFFER
+		    dumpBuffer(REQ_HEADER_DUMP, Session->client.request.header_norm, Session->client.request.header_norm_size);
+#endif
+
 #ifdef DEBUG
                     hi_stats.req_header_len += Session->client.request.header_norm_size;
 #endif
@@ -4177,6 +4283,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                         Session->client.request.header_raw_size);
 
                     p->packet_flags |= PKT_HTTP_DECODE;
+#ifdef DUMP_BUFFER
+	            dumpBuffer(RAW_REQ_HEADER_DUMP, Session->client.request.header_raw, Session->client.request.header_raw_size);
+#endif
                 }
             }
 
@@ -4201,6 +4310,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                             Session->client.request.post_encode_type);
 
                         p->packet_flags |= PKT_HTTP_DECODE;
+#ifdef DUMP_BUFFER
+			dumpBuffer(CLIENT_BODY_DUMP, Session->client.request.post_raw, Session->client.request.post_raw_size);
+#endif
                     }
 
                 }
@@ -4218,6 +4330,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                     Session->client.request.method_size);
 
                 p->packet_flags |= PKT_HTTP_DECODE;
+#ifdef DUMP_BUFFER
+		dumpBuffer(METHOD_DUMP, Session->client.request.method_raw, Session->client.request.method_size);
+#endif
             }
 
             if ( Session->client.request.cookie_norm ||
@@ -4238,6 +4353,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                             Session->client.request.cookie.cookie);
 
                     p->packet_flags |= PKT_HTTP_DECODE;
+#ifdef DUMP_BUFFER
+	            dumpBuffer(COOKIE_DUMP, Session->client.request.cookie_norm, Session->client.request.cookie_norm_size);
+#endif
                 }
                 else
                 {
@@ -4255,6 +4373,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                             Session->client.request.cookie.cookie);
 
                     p->packet_flags |= PKT_HTTP_DECODE;
+#ifdef DUMP_BUFFER
+		    dumpBuffer(RAW_COOKIE_DUMP, Session->client.request.cookie.cookie, Session->client.request.cookie.cookie_end - Session->client.request.cookie.cookie);
+#endif
                 }
             }
             else if ( !Session->server_conf->enable_cookie &&
@@ -4267,7 +4388,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                 assert(hb);
 
                 SetHttpBuffer(HTTP_BUFFER_RAW_COOKIE, hb->buf, hb->length);
-
+#ifdef DUMP_BUFFER
+		dumpBuffer(RAW_COOKIE_DUMP, hb->buf, hb->length);
+#endif
                 p->packet_flags |= PKT_HTTP_DECODE;
             }
 
@@ -4325,6 +4448,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                          HTTP_BUFFER_RAW_HEADER,
                          Session->server.response.header_raw,
                          Session->server.response.header_raw_size);
+#ifdef DUMP_BUFFER
+		     dumpBuffer(RESP_HEADER_DUMP, Session->server.response.header_norm, Session->server.response.header_norm_size);
+#endif
                  }
                  else
                  {
@@ -4337,6 +4463,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                          HTTP_BUFFER_RAW_HEADER,
                          Session->server.response.header_raw,
                          Session->server.response.header_raw_size);
+#ifdef DUMP_BUFFER
+		     dumpBuffer(RAW_RESP_HEADER_DUMP, Session->server.response.header_raw, Session->server.response.header_raw_size);
+#endif
                  }
              }
 
@@ -4356,6 +4485,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                          Session->server.response.cookie.cookie,
                          Session->server.response.cookie.cookie_end -
                              Session->server.response.cookie.cookie);
+#ifdef DUMP_BUFFER
+	             dumpBuffer(RESP_COOKIE_DUMP, Session->server.response.cookie_norm, Session->server.response.cookie_norm_size);
+#endif
                  }
                  else
                  {
@@ -4370,6 +4502,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                          Session->server.response.cookie.cookie,
                          Session->server.response.cookie.cookie_end -
                              Session->server.response.cookie.cookie);
+#ifdef DUMP_BUFFER
+		     dumpBuffer(RAW_RESP_COOKIE_DUMP, Session->server.response.cookie.cookie, Session->server.response.cookie.cookie_end - Session->server.response.cookie.cookie);
+#endif
                  }
              }
              else if ( !Session->server_conf->enable_cookie &&
@@ -4382,6 +4517,10 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                  assert(hb);
 
                  SetHttpBuffer(HTTP_BUFFER_RAW_COOKIE, hb->buf, hb->length);
+
+#ifdef DUMP_BUFFER
+		 dumpBuffer(RAW_RESP_COOKIE_DUMP, hb->buf, hb->length);
+#endif
              }
 
              if(Session->server.response.status_code)
@@ -4390,6 +4529,18 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                      HTTP_BUFFER_STAT_CODE,
                      Session->server.response.status_code,
                      Session->server.response.status_code_size);
+                 
+                 if (!strncmp((const char*)Session->server.response.status_code, "206", 3) && !hsd->resp_state.eoh_found)
+                 {
+                    /* If status code 206 is seen but EOH is not seen, then look for partial content
+                     * in subsequent packets
+                     */
+                    hsd->resp_state.look_for_partial_content = true;
+                 }
+
+#ifdef DUMP_BUFFER
+		 dumpBuffer(STAT_CODE_DUMP, Session->server.response.status_code, Session->server.response.status_code_size);
+#endif
              }
 
              if(Session->server.response.status_msg)
@@ -4398,6 +4549,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                      HTTP_BUFFER_STAT_MSG,
                      Session->server.response.status_msg,
                      Session->server.response.status_msg_size);
+#ifdef DUMP_BUFFER
+		 dumpBuffer(STAT_MSG_DUMP, Session->server.response.status_msg, Session->server.response.status_msg_size);
+#endif
              }
 
              if(Session->server.response.body_raw_size > 0)
@@ -4462,10 +4616,16 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                      }
 
                      setFileDataPtr(Session->server.response.body, (uint16_t)Session->server.response.body_size);
+#ifdef DUMP_BUFFER
+	             dumpBuffer(FILE_DATA_DUMP, Session->server.response.body, (uint16_t)Session->server.response.body_size);
+#endif
                  }
                  else
                  {
                      setFileDataPtr(Session->server.response.body, (uint16_t)detect_data_size);
+#ifdef DUMP_BUFFER
+                     dumpBuffer(FILE_DATA_DUMP, Session->server.response.body, (uint16_t)detect_data_size);
+#endif
                  }
 
                  if (ScPafEnabled() && PacketHasPAFPayload(p))
@@ -4485,6 +4645,9 @@ int SnortHttpInspect(HTTPINSPECT_GLOBAL_CONF *GlobalConf, Packet *p)
                      }
                  }
                  is_first = false;
+#ifdef DUMP_BUFFER
+                 dumpBuffer(RESP_BODY_DUMP, Session->server.response.body_raw, Session->server.response.body_raw_size);
+#endif
              }
 
              if( IsLimitedDetect(p) &&
@@ -4597,6 +4760,9 @@ int HttpInspectInitializeGlobalConfig(HTTPINSPECT_GLOBAL_CONF *config,
     file_api->set_mime_decode_config_defauts(&(config->decode_conf));
     file_api->set_mime_log_config_defauts(&(config->mime_conf));
 
+    RegisterGetHttpXffFields(getHttpXffFields);
+    session_api->register_get_http_xff_precedence(getHttpXffPrecedence);
+
     return 0;
 }
 
@@ -4615,6 +4781,8 @@ HttpSessionData * SetNewHttpSessionData(Packet *p, void *data)
 
     hsd->fd_state = (fd_session_p_t)NULL;
     hsd->resp_state.eoh_found = false;
+    hsd->resp_state.look_for_partial_content = false;
+    hsd->resp_state.chunk_len_state = CHUNK_LEN_DEFAULT;
 
     return hsd;
 }
@@ -4877,6 +5045,27 @@ static int GetHttpInspectConf( void *ssn, uint32_t flags, HTTPINSPECT_CONF **ser
     return iRet;
 }
 
+static char** getHttpXffPrecedence(void* ssn, uint32_t flags, int* nFields)
+{
+    HTTPINSPECT_CONF *serverConf = NULL;
+    HTTPINSPECT_CONF *clientConf = NULL;
+
+    GetHttpInspectConf(ssn, flags, &serverConf, &clientConf);
+
+    if (!serverConf || !serverConf->xff_headers[0])
+    {
+        if (nFields) *nFields = 0;
+        return NULL;
+    }
+
+    if (nFields)
+    {
+        for ((*nFields) = 0; ((*nFields) < HTTP_MAX_XFF_FIELDS) && serverConf->xff_headers[*nFields]; (*nFields)++)
+            ;
+    }
+    return (char**)serverConf->xff_headers;
+}
+
 int GetHttpFlowDepth(void *ssn, uint32_t flags)
 {
     HTTPINSPECT_CONF *serverConf = 0;
@@ -4903,4 +5092,18 @@ int GetHttpFlowDepth(void *ssn, uint32_t flags)
     return flow_depth;
 }
 
+bool isHttpRespPartialCont(void *data)
+{
+    HttpSessionData *hsd = NULL;
 
+    if (data == NULL) {
+        return false;
+    }
+
+    hsd = (HttpSessionData *)session_api->get_application_data(data, PP_HTTPINSPECT);
+    if (hsd == NULL) {
+        return false;
+    }
+
+    return hsd->resp_state.look_for_partial_content;
+}

@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -165,7 +165,9 @@ tAppIdData *AppIdEarlySessionCreate(tAppIdData *flowp, SFSnortPacket *ctrlPkt, s
         inet_ntop(sfaddr_family(srvIp), (void *)sfaddr_get_ptr(srvIp), dst_ip, sizeof(dst_ip));
     }
 
-    data = appSharedDataAlloc(proto, cliIp);
+    data = appSharedDataAlloc(proto, (struct in6_addr*)sfaddr_get_ip6_ptr(cliIp), 0);
+    if (data)
+        data->common.policyId = appIdPolicyId;
 
     node = (flags & APPID_EARLY_SESSION_FLAG_FW_RULE) ? &ctrlPkt->expectedSession : NULL;
 

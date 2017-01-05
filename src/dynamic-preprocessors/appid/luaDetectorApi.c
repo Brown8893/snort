@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -555,27 +555,19 @@ static int service_analyzePayload(
  * changed to take an additional void* that will be used to call only a unique detector.
  */
 /*Common validate function that wraps lua based validate functions. */
-int validateAnyService(
-        const uint8_t *data,
-        uint16_t size,
-        const int dir,
-        tAppIdData *flowp,
-        SFSnortPacket *pkt,
-        struct _Detector *detector,
-        const struct appIdConfig_ *pConfig
-        )
-
+int validateAnyService(ServiceValidationArgs *args)
 {
     int retValue;
     lua_State *myLuaState = NULL;
     const char *serverName;
+    struct _Detector *detector = args->userdata;
     PROFILE_VARS;
 #ifdef PERF_PROFILING
     PreprocStats *pPerfStats1;
     PreprocStats *pPerfStats2;
 #endif
 
-    if (!data || !flowp || !pkt || !detector)
+    if (!detector)
     {
         _dpd.errMsg( "invalid LUA parameters");
         return SERVICE_ENULL;
@@ -593,11 +585,11 @@ int validateAnyService(
     PREPROC_PROFILE_START((*pPerfStats2));
 
     myLuaState = detector->myLuaState;
-    detector->validateParams.data = data;
-    detector->validateParams.size = size;
-    detector->validateParams.dir = dir;
-    detector->validateParams.flowp = flowp;
-    detector->validateParams.pkt = pkt;
+    detector->validateParams.data = args->data;
+    detector->validateParams.size = args->size;
+    detector->validateParams.dir = args->dir;
+    detector->validateParams.flowp = args->flowp;
+    detector->validateParams.pkt = args->pkt;
     serverName = detector->name;
 
     /*Note: Some frequently used header fields may be extracted and stored in detector for */
@@ -2188,140 +2180,212 @@ static int Detector_addContentTypePattern(lua_State *L)
     return 0;
 }
 
-static int Detector_CHPCreateApp (lua_State *L)
+static inline int GetDetectorUserData(lua_State *L, int index,
+        DetectorUserData **detector_user_data, const char *errorString)
 {
-    int index = 1;
-
     // Verify detector user data and that we are not in packet context
-    DetectorUserData *detectorUserData = checkDetectorUserData(L, index++);
-    if (!detectorUserData || detectorUserData->pDetector->validateParams.pkt)
+    *detector_user_data = checkDetectorUserData(L, index);
+    if (!*detector_user_data || (*detector_user_data)->pDetector->validateParams.pkt)
     {
-        _dpd.errMsg( "LuaDetectorApi:Invalid HTTP detector user data in CHPCreateApp.");
-        return 0;
+        _dpd.errMsg(errorString);
+        return -1;
     }
+    return 0;
+}
 
-    tAppId appId =              lua_tointeger(L, index++);
-    unsigned app_type_flags =   lua_tointeger(L, index++);
-    int num_matches =           lua_tointeger(L, index++);
-
-    // We only want one of these for each appId.
-    if (sfxhash_find(detectorUserData->pDetector->pAppidNewConfig->CHP_glossary, &appId))
-    {
-        _dpd.errMsg( "LuaDetectorApi:Attempt to add more than one CHP for appId %d", appId);
-        return 0;
-    }
-
+static int detector_create_chp_app(DetectorUserData *detectorUserData, tAppId appIdInstance,
+                unsigned app_type_flags, int num_matches)
+{
     CHPApp *new_app = (CHPApp *)calloc(1,sizeof(CHPApp));
     if (!new_app)
     {
         _dpd.errMsg( "LuaDetectorApi:Failed to allocate CHP app memory.");
-        return 0;
+        return -1;
     }
-    new_app->appId = appId;
+    new_app->appIdInstance = appIdInstance;
     new_app->app_type_flags = app_type_flags;
     new_app->num_matches = num_matches;
 
-    if (sfxhash_add(detectorUserData->pDetector->pAppidNewConfig->CHP_glossary, &(new_app->appId), new_app))
+    if (sfxhash_add(detectorUserData->pDetector->pAppidNewConfig->CHP_glossary, &(new_app->appIdInstance), new_app))
     {
-        _dpd.errMsg( "LuaDetectorApi:Failed to add CHP for appId %d", appId);
+        _dpd.errMsg( "LuaDetectorApi:Failed to add CHP for appId %d, instance %d", CHP_APPIDINSTANCE_TO_ID(appIdInstance), CHP_APPIDINSTANCE_TO_INSTANCE(appIdInstance));
         free(new_app);
-        return 0;
+        return -1;
     }
-
     return 0;
 }
 
-static int Detector_CHPAddAction (lua_State *L)
+static int Detector_CHPCreateApp (lua_State *L)
 {
-    int index = 1;
-    const char *tmpString = NULL;
-    CHPListElement *tmp_chpa, *chpa;
-    CHPApp *chpapp;
+    DetectorUserData *detectorUserData;
+    tAppId appId;
+    unsigned app_type_flags;
+    int num_matches;
 
-    // Verify detector user data and that we are not in packet context
-    DetectorUserData *detectorUserData = checkDetectorUserData(L, index++);
-    if (!detectorUserData || detectorUserData->pDetector->validateParams.pkt)
+    tAppId appIdInstance;
+
+    int index = 1;
+
+    if (GetDetectorUserData(L, index++, &detectorUserData,
+        "LuaDetectorApi:Invalid HTTP detector user data in CHPCreateApp."))
+        return 0;
+
+    appId = lua_tointeger(L, index++);
+    appIdInstance = CHP_APPID_SINGLE_INSTANCE(appId); // Last instance for the old API
+
+    app_type_flags =    lua_tointeger(L, index++);
+    num_matches =       lua_tointeger(L, index++);
+
+    // We only want one of these for each appId.
+    if (sfxhash_find(detectorUserData->pDetector->pAppidNewConfig->CHP_glossary, &appIdInstance))
     {
-        _dpd.errMsg( "LuaDetectorApi:Invalid HTTP detector user data in CHPAddAction.");
+        _dpd.errMsg( "LuaDetectorApi:Attempt to add more than one CHP for appId %d - use CHPMultiCreateApp", appId);
         return 0;
     }
 
-    tAppId appId = lua_tointeger(L, index++);
-    int key_pattern = lua_tointeger(L, index++);
+    detector_create_chp_app(detectorUserData, appIdInstance, app_type_flags, num_matches);
+    return 0;
+}
 
-    PatternType ptype = (PatternType) lua_tointeger(L, index++);
-    if(ptype < AGENT_PT || ptype > MAX_PATTERN_TYPE)
+static inline int CHPGetKeyPatternBoolean(lua_State *L, int index)
+{
+    return (0 != lua_tointeger(L, index));
+}
+
+static inline int CHPGetPatternType(lua_State *L, int index, PatternType *pattern_type)
+{
+    *pattern_type = (PatternType) lua_tointeger(L, index);
+    if(*pattern_type < AGENT_PT || *pattern_type > MAX_PATTERN_TYPE)
     {
         _dpd.errMsg( "LuaDetectorApi:Invalid CHP Action pattern type.");
-        return 0;
+        return -1;
     }
+    return 0;
+}
 
-    size_t psize = 0;
-    char *pattern = NULL;
-    tmpString = lua_tolstring(L, index++, &psize);
-    if(!tmpString || !psize || !(pattern = strdup(tmpString))) // non-empty pattern required
+static inline int CHPGetPatternDataAndSize(lua_State *L, int index, char **pattern_data, size_t *pattern_size)
+{
+    const char *tmpString = NULL; // Lua owns this pointer
+    *pattern_size = 0;
+    *pattern_data = NULL;
+    tmpString = lua_tolstring(L, index, &*pattern_size);
+    if(!tmpString || !*pattern_size || !(*pattern_data = strdup(tmpString))) // non-empty pattern required
     {
-        if (psize) // implies strdup() failed
-            _dpd.errMsg( "LuaDetectorApi:Pattern string mem alloc failed.");
+        if (*pattern_size) // implies strdup() failed
+            _dpd.errMsg( "LuaDetectorApi:CHP Action PATTERN string mem alloc failed.");
         else
-            _dpd.errMsg( "LuaDetectorApi:Invalid CHP Action pattern string.");
-        return 0;
+            _dpd.errMsg( "LuaDetectorApi:Invalid CHP Action PATTERN string."); // empty string in Lua code - bad
+        return -1;
     }
+    return 0;
+}
 
-    ActionType action = (ActionType) lua_tointeger(L, index++);
-    if (action < NO_ACTION || action > MAX_ACTION_TYPE)
+static inline int CHPGetActionType(lua_State *L, int index, ActionType *action_type)
+{
+    *action_type = (ActionType) lua_tointeger(L, index);
+    if (*action_type < NO_ACTION || *action_type > MAX_ACTION_TYPE)
     {
         _dpd.errMsg( "LuaDetectorApi:Incompatible CHP Action type, might be for a later version.");
-        free(pattern);
-        return 0;
+        return -1;
     }
+    return 0;
+}
 
+static inline int CHPGetActionData(lua_State *L, int index, char **action_data)
+{
+    // An empty string is translated into a NULL pointer because the action data is optional
+    const char *tmpString = NULL; // Lua owns this pointer
     size_t action_data_size = 0;
-    char *action_data = NULL;
-    tmpString = lua_tolstring(L, index++, &action_data_size);
+    *action_data = NULL;
+    tmpString = lua_tolstring(L, index, &action_data_size);
     if (action_data_size)
     {
-        if(!(action_data = strdup(tmpString)))
+        if(!(*action_data = strdup(tmpString)))
         {
-            _dpd.errMsg( "LuaDetectorApi:Action data string mem alloc failed.");
-            free(pattern);
-            return 0;
+            _dpd.errMsg( "LuaDetectorApi:Action DATA string mem alloc failed.");
+            return -1;
         }
     }
+    return 0;
+}
+
+static int detector_add_chp_action(DetectorUserData *detectorUserData,
+                    tAppId appIdInstance, int isKeyPattern, PatternType patternType,
+                    size_t patternSize, char *patternData, ActionType actionType, char *optionalActionData)
+{
+    uint precedence;
+    CHPListElement *tmp_chpa, *prev_chpa, *chpa;
+    CHPApp *chpapp;
+    tAppIdConfig *pConfig = detectorUserData->pDetector->pAppidNewConfig;
 
     //find the CHP App for this
-    if (!(chpapp = sfxhash_find(detectorUserData->pDetector->pAppidNewConfig->CHP_glossary, &appId)))
+    if (!(chpapp = sfxhash_find(detectorUserData->pDetector->pAppidNewConfig->CHP_glossary, &appIdInstance)))
     {
-        _dpd.errMsg( "LuaDetectorApi:Invalid attempt to add an CHP action for unknown appId %d.", appId);
-        free(pattern);
-        if (action_data) free(action_data);
+        _dpd.errMsg( "LuaDetectorApi:Invalid attempt to add a CHP action for unknown appId %d, instance %d. - pattern:\"%s\" - action \"%s\"\n",
+            CHP_APPIDINSTANCE_TO_ID(appIdInstance), CHP_APPIDINSTANCE_TO_INSTANCE(appIdInstance),
+            patternData, optionalActionData ? optionalActionData : "");
+        free(patternData);
+        if (optionalActionData) free(optionalActionData);
         return 0;
     }
 
-    if (chpapp->ptype_scan_counts[ptype] == 0)
+    if (isKeyPattern)
+    {
+        chpapp->key_pattern_count++;
+        chpapp->key_pattern_length_sum += patternSize;
+    }
+
+    if (chpapp->ptype_scan_counts[patternType] == 0)
         chpapp->num_scans++;
-    chpapp->ptype_scan_counts[ptype]++;
+    precedence = chpapp->ptype_scan_counts[patternType]++; // The increment is for the sake of the precedence. ptype_scan_counts means "The scan DOES count toward the total required."
     // at runtime we'll want to know how many of each type of pattern we are looking for.
-    if (action != ALTERNATE_APPID)
-        chpapp->ptype_req_counts[ptype]++;
+    if (actionType == REWRITE_FIELD || actionType == INSERT_FIELD)
+    {
+        if (!appInfoEntryFlagGet(CHP_APPIDINSTANCE_TO_ID(appIdInstance), APPINFO_FLAG_SUPPORTED_SEARCH, pConfig))
+        {
+            _dpd.errMsg( "LuaDetectorApi: CHP action type, %d, requires previous use of action type, %d, (see appId %d, pattern=\"%s\").\n",
+                actionType, GET_OFFSETS_FROM_REBUILT, CHP_APPIDINSTANCE_TO_ID(appIdInstance), patternData);
+            free(patternData);
+            if (optionalActionData) free(optionalActionData);
+            return 0;
+        }
+        switch (patternType)
+        {
+            // permitted pattern type (modifiable HTTP/SPDY request field)
+            case AGENT_PT:
+            case HOST_PT:
+            case REFERER_PT:
+            case URI_PT:
+            case COOKIE_PT:
+                break;
+            default:
+                _dpd.errMsg( "LuaDetectorApi: CHP action type, %d, on unsupported pattern type, %d, (see appId %d, pattern=\"%s\").\n",
+                    actionType, patternType, CHP_APPIDINSTANCE_TO_ID(appIdInstance), patternData);
+                free(patternData);
+                if (optionalActionData) free(optionalActionData);
+                return 0;
+        }
+    }
+    else if (actionType != ALTERNATE_APPID && actionType != DEFER_TO_SIMPLE_DETECT)
+        chpapp->ptype_req_counts[patternType]++;
 
     chpa = (CHPListElement*)calloc(1,sizeof(CHPListElement));
     if (!chpa)
     {
-        _dpd.errMsg( "LuaDetectorApi:Failed to allocate CHP action memory.");
-        free(pattern);
-        if (action_data) free(action_data);
+        _dpd.errMsg( "LuaDetectorApi: Failed to allocate CHP action memory.\n");
+        free(patternData);
+        if (optionalActionData) free(optionalActionData);
         return 0;
     }
-    chpa->chp_action.appId = appId;
-    chpa->chp_action.key_pattern = key_pattern;
-    chpa->chp_action.ptype = ptype;
-    chpa->chp_action.psize = psize;
-    chpa->chp_action.pattern = pattern;
-    chpa->chp_action.action = action;
-    chpa->chp_action.action_data = action_data;
-
-    tAppIdConfig *pConfig = detectorUserData->pDetector->pAppidNewConfig;
+    chpa->chp_action.appIdInstance = appIdInstance;
+    chpa->chp_action.precedence = precedence;
+    chpa->chp_action.key_pattern = isKeyPattern;
+    chpa->chp_action.ptype = patternType;
+    chpa->chp_action.psize = patternSize;
+    chpa->chp_action.pattern = patternData;
+    chpa->chp_action.action = actionType;
+    chpa->chp_action.action_data = optionalActionData;
+    chpa->chp_action.chpapp = chpapp; // link this struct to the Glossary entry
 
     tmp_chpa = pConfig->httpPatternLists.chpList;
     if (!tmp_chpa) pConfig->httpPatternLists.chpList = chpa;
@@ -2332,7 +2396,201 @@ static int Detector_CHPAddAction (lua_State *L)
         tmp_chpa->next = chpa;
     }
 
+    /* Set the safe-search bits in the appId entry */
+    if (actionType == GET_OFFSETS_FROM_REBUILT)
+    {
+        /* This is a search engine and it is SUPPORTED for safe-search packet rewrite */
+        appInfoEntryFlagSet(CHP_APPIDINSTANCE_TO_ID(appIdInstance), APPINFO_FLAG_SEARCH_ENGINE | APPINFO_FLAG_SUPPORTED_SEARCH, pConfig);
+    }
+    else if (actionType == SEARCH_UNSUPPORTED)
+    {
+        /* This is a search engine and it is UNSUPPORTED for safe-search packet rewrite */
+        appInfoEntryFlagSet(CHP_APPIDINSTANCE_TO_ID(appIdInstance), APPINFO_FLAG_SEARCH_ENGINE, pConfig);
+    }
+    else if (actionType == DEFER_TO_SIMPLE_DETECT && strcmp(patternData,"<ignore-all-patterns>") == 0)
+    {
+        // Walk the list of all the patterns we have inserted, searching for this appIdInstance and free them.
+        // The purpose is for the 14 and 15 to be used together to only set the APPINFO_FLAG_SEARCH_ENGINE flag
+        // If the reserved pattern is not used, it is a mixed use case and should just behave normally.
+        prev_chpa = NULL;
+        tmp_chpa = pConfig->httpPatternLists.chpList;
+        while (tmp_chpa)
+        {
+            if (tmp_chpa->chp_action.appIdInstance == appIdInstance)
+            {
+                // advance the tmp_chpa pointer by removing the item pointed to. Keep prev_chpa unchanged.
+
+                // 1) unlink the struct, 2) free strings and then 3) free the struct.
+                chpa = tmp_chpa; // preserve this pointer to be freed at the end.
+                if (prev_chpa == NULL)
+                {
+                    // Remove from head
+                    pConfig->httpPatternLists.chpList = tmp_chpa->next;
+                    tmp_chpa = pConfig->httpPatternLists.chpList;
+                }
+                else
+                {
+                    // Remove from middle of list.
+                    prev_chpa->next = tmp_chpa->next;
+                    tmp_chpa = prev_chpa->next;
+                }
+                free(chpa->chp_action.pattern);
+                if (chpa->chp_action.action_data) free(chpa->chp_action.action_data);
+                free(chpa);
+            }
+            else
+            {
+                // advance both pointers
+                prev_chpa = tmp_chpa;
+                tmp_chpa = tmp_chpa->next;
+            }
+        }
+    }
     return 0;
+}
+static int Detector_CHPAddAction (lua_State *L)
+{
+    DetectorUserData *detectorUserData;
+    int key_pattern;
+    PatternType ptype;
+    size_t psize;
+    char *pattern;
+    ActionType action;
+    char *action_data;
+
+    tAppId appIdInstance;
+    tAppId appId;
+
+    int index = 1;
+
+    if (GetDetectorUserData(L, index++, &detectorUserData,
+        "LuaDetectorApi:Invalid HTTP detector user data in CHPAddAction."))
+        return 0;
+
+    // Parameter 1
+    appId = lua_tointeger(L, index++);
+    appIdInstance = CHP_APPID_SINGLE_INSTANCE(appId); // Last instance for the old API
+
+    // Parameter 2
+    key_pattern = CHPGetKeyPatternBoolean(L, index++);
+
+    // Parameter 3
+    if (CHPGetPatternType(L, index++, &ptype))
+        return 0;
+
+    // Parameter 4
+    if (CHPGetPatternDataAndSize(L, index++, &pattern, &psize))
+        return 0;
+
+    // Parameter 5
+    if (CHPGetActionType(L, index++, &action))
+    {
+        free(pattern);
+        return 0;
+    }
+
+    // Parameter 6
+    if (CHPGetActionData(L, index++, &action_data))
+    {
+        free(pattern);
+        return 0;
+    }
+
+    return detector_add_chp_action(detectorUserData, appIdInstance, key_pattern, ptype,
+                    psize, pattern, action, action_data);
+}
+
+static int Detector_CHPMultiCreateApp (lua_State *L)
+{
+    DetectorUserData *detectorUserData;
+    tAppId appId;
+    unsigned app_type_flags;
+    int num_matches;
+
+    tAppId appIdInstance;
+    int instance;
+
+    int index = 1;
+
+    if (GetDetectorUserData(L, index++, &detectorUserData,
+        "LuaDetectorApi:Invalid HTTP detector user data in CHPMultiCreateApp."))
+        return 0;
+
+    appId =             lua_tointeger(L, index++);
+    app_type_flags =    lua_tointeger(L, index++);
+    num_matches =       lua_tointeger(L, index++);
+
+    for (instance=0; instance < CHP_APPID_INSTANCE_MAX; instance++ )
+    {
+        appIdInstance = (appId << CHP_APPID_BITS_FOR_INSTANCE) + instance;
+        if (sfxhash_find(detectorUserData->pDetector->pAppidNewConfig->CHP_glossary, &appIdInstance))
+            continue;
+        break;
+    }
+
+    // We only want a maximum of these for each appId.
+    if (instance == CHP_APPID_INSTANCE_MAX)
+    {
+        _dpd.errMsg( "LuaDetectorApi:Attempt to create more than %d CHP for appId %d", CHP_APPID_INSTANCE_MAX, appId);
+        return 0;
+    }
+
+    if (detector_create_chp_app(detectorUserData, appIdInstance, app_type_flags, num_matches))
+        return 0;
+
+    lua_pushnumber(L, appIdInstance);
+    return 1;
+}
+
+
+static int Detector_CHPMultiAddAction (lua_State *L)
+{
+    DetectorUserData *detectorUserData;
+    int key_pattern;
+    PatternType ptype;
+    size_t psize;
+    char *pattern;
+    ActionType action;
+    char *action_data;
+
+    tAppId appIdInstance;
+
+    int index = 1;
+
+    if (GetDetectorUserData(L, index++, &detectorUserData,
+        "LuaDetectorApi:Invalid HTTP detector user data in CHPMultiAddAction."))
+        return 0;
+
+    // Parameter 1
+    appIdInstance = lua_tointeger(L, index++);
+
+    // Parameter 2
+    key_pattern = CHPGetKeyPatternBoolean(L, index++);
+
+    // Parameter 3
+    if (CHPGetPatternType(L, index++, &ptype))
+        return 0;
+
+    // Parameter 4
+    if (CHPGetPatternDataAndSize(L, index++, &pattern, &psize))
+        return 0;
+
+    // Parameter 5
+    if (CHPGetActionType(L, index++, &action))
+    {
+        free(pattern);
+        return 0;
+    }
+
+    // Parameter 6
+    if (CHPGetActionData(L, index++, &action_data))
+    {
+        free(pattern);
+        return 0;
+    }
+
+    return detector_add_chp_action(detectorUserData, appIdInstance, key_pattern, ptype,
+                    psize, pattern, action, action_data);
 }
 
 static int Detector_portOnlyService (lua_State *L)
@@ -3570,7 +3828,7 @@ static int createFutureFlow (lua_State *L)
         fp->serviceAppId = service_app_id;
         fp->clientAppId  = client_app_id;
         fp->payloadAppId = payload_app_id;
-        setAppIdExtFlag(fp, APPID_SESSION_SERVICE_DETECTED | APPID_SESSION_NOT_A_SERVICE | APPID_SESSION_PORT_SERVICE_DONE);
+        setAppIdFlag(fp, APPID_SESSION_SERVICE_DETECTED | APPID_SESSION_NOT_A_SERVICE | APPID_SESSION_PORT_SERVICE_DONE);
         fp->rnaServiceState = RNA_STATE_FINISHED;
         fp->rnaClientState  = RNA_STATE_FINISHED;
 
@@ -3670,6 +3928,8 @@ static const luaL_reg Detector_methods[] = {
   //HTTP Multi Pattern engine
   {"CHPCreateApp",             Detector_CHPCreateApp},
   {"CHPAddAction",             Detector_CHPAddAction},
+  {"CHPMultiCreateApp",        Detector_CHPMultiCreateApp}, // allows multiple detectors, same appId
+  {"CHPMultiAddAction",        Detector_CHPMultiAddAction},
 
   //App Forecasting engine
   {"AFAddApp",                 Detector_AFAddApp},
@@ -3738,7 +3998,7 @@ void Detector_fini(void *data)
     }
     else
     {
-        _dpd.errMsg("%s: DetectorFini not provided\n",detector->server.serviceModule.name);
+        _dpd.errMsg("%s: DetectorFini not provided\n",detector->name);
     }
 
     freeDetector(detector);

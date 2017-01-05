@@ -1,7 +1,7 @@
 /* $Id$ */
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -81,6 +81,7 @@ uint32_t session_mem_in_use = 0;
 
 SessionConfiguration *session_configuration = NULL;
 static SessionConfiguration *session_reload_configuration = NULL;
+static GetHttpXffPrecedenceFunc getHttpXffPrecedenceFunc = NULL;
 
 SessionCache *proto_session_caches[ SESSION_PROTO_MAX ];
 
@@ -168,6 +169,8 @@ static uint32_t getSessionFlags( void *scbptr );
 static tSfPolicyId getSessionPolicy(void *scbptr, int policy_type);
 static void setSessionPolicy(void *scbptr, int policy_type, tSfPolicyId id);
 static StreamFlowData *getFlowData( Packet *p );
+static void setSessionDeletionDelayed( void *scbptr, bool delay_session_deletion_flag);
+static bool isSessionDeletionDelayed( void *scbptr );
 static int setAppProtocolIdExpected( const Packet *ctrlPkt, sfaddr_t* srcIP, uint16_t srcPort, sfaddr_t* dstIP,
         uint16_t dstPort, uint8_t protocol, int16_t protoId, uint32_t preprocId,
         void* protoData, void (*protoDataFreeFn)(void*),
@@ -199,6 +202,8 @@ static void enablePreprocAllPorts( SnortConfig *sc, uint32_t preproc_id, uint32_
 static void enablePreprocAllPortsAllPolicies( SnortConfig *sc, uint32_t preproc_id, uint32_t proto );
 static bool isPreprocEnabledForPort( uint32_t preproc_id, uint16_t port );
 static void registerNapSelector( nap_selector nap_selector_func );
+static void registerGetHttpXffPrecedence(GetHttpXffPrecedenceFunc fn);
+static char** getHttpXffPrecedence(void* ssn, uint32_t flags, int* nFields);
 
 SessionAPI session_api_dispatch_table = {
     /* .version = */ SESSION_API_VERSION1,
@@ -242,6 +247,8 @@ SessionAPI session_api_dispatch_table = {
     /* .get_runtime_policy = */ getSessionPolicy,
     /* .set_runtime_policy = */ setSessionPolicy,
     /* .get_flow_data = */ getFlowData,
+    /* .set_session_deletion_delayed = */ setSessionDeletionDelayed,
+    /* .is_session_deletion_delayed = */ isSessionDeletionDelayed,
 #ifdef TARGET_BASED
     /* .register_service_handler  */ registerApplicationHandler,
     /* .get_application_protocol_id = */ getAppProtocolId,
@@ -277,6 +284,8 @@ SessionAPI session_api_dispatch_table = {
     /* .register_mandatory_early_session_creator = */ registerMandatoryEarlySessionCreator,
     /* .get_application_data_from_expected_node = */ getApplicationDataFromExpectedNode,
     /* .add_application_data_to_expected_node = */ addApplicationDataToExpectedNode,
+    /* .register_get_http_xff_precedence = */ registerGetHttpXffPrecedence,
+    /* .get_http_xff_precedence = */ getHttpXffPrecedence,
     /* .get_next_expected_node = */ getNextExpectedNode,
 };
 
@@ -1246,8 +1255,7 @@ void initializePacketPolicy( Packet *p, SessionControlBlock *scb )
             // session config has been reloaded, reevaluate packet against NAP rules
             decrementPolicySessionRefCount( scb );
             scb->initial_pp = NULL;
-            scb->stream_config = NULL;
-            scb->proto_policy = NULL;
+            scb->stream_config_stale = true;
             scb->napPolicyId = SF_POLICY_UNBOUND;
             scb->ipsPolicyId = SF_POLICY_UNBOUND;
             scb->session_config = session_configuration;
@@ -2022,7 +2030,10 @@ static int pruneSessionCache( void *sessionCache, uint32_t thetime, void *save_m
         scb = ( SessionControlBlock * ) sfxhash_lru( session_cache->hashTable );
 
         if( scb == NULL )
+        {
+            Active_Resume();
             return 0;
+        }
 
         do
         {
@@ -2111,6 +2122,8 @@ static int pruneSessionCache( void *sessionCache, uint32_t thetime, void *save_m
 
             if( scb == save_me )
             {
+                if(sfxhash_count(session_cache->hashTable) == 1)
+                    break;
                 moveHashNodeToFront( session_cache );
                 continue;
             }
@@ -2238,6 +2251,7 @@ static void *createSession(void *sessionCache, Packet *p, const SessionKey *key 
             boInitStaticBITOP(&(flowdata->boFlowbits), getFlowbitSizeInBytes(), flowdata->flowb);
         }
 
+        scb->stream_config_stale = true;
         scb->stream_config = NULL;
         scb->proto_policy = NULL;
         scb->napPolicyId = SF_POLICY_UNBOUND;
@@ -2897,6 +2911,10 @@ static void deleteSessionIfClosed( Packet* p )
 
     if (scb->session_state & STREAM_STATE_CLOSED)
     {
+        if (scb->is_session_deletion_delayed) {
+            setSessionExpirationTime( p, scb, STREAM_DELAY_TIMEOUT_AFTER_CONNECTION_ENDED);
+            return;
+        }
         switch (scb->protocol)
         {
             case IPPROTO_TCP:
@@ -2990,6 +3008,24 @@ void setSessionPolicy( void *scbptr, int policy_type, tSfPolicyId id )
         scb->napPolicyId = id;
     else
         scb->ipsPolicyId = id;
+}
+
+static void setSessionDeletionDelayed( void *scbptr, bool delay_session_deletion_flag)
+{
+    SessionControlBlock *scb = (SessionControlBlock *) scbptr;
+    if ( scb == NULL )
+        return;
+
+    scb->is_session_deletion_delayed = delay_session_deletion_flag;
+}
+
+static bool isSessionDeletionDelayed( void *scbptr )
+{
+    SessionControlBlock *scb = ( SessionControlBlock * ) scbptr;
+    if( scb == NULL )
+        return !STREAM_DELAY_SESSION_DELETION;
+
+    return scb->is_session_deletion_delayed;
 }
 
 static int ignoreChannel( const Packet *ctrlPkt, sfaddr_t* srcIP, uint16_t srcPort,
@@ -3504,6 +3540,17 @@ static void registerNapSelector( nap_selector nap_selector_func )
 
     if( nap_selector_func != NULL )
         pfunks->select_session_nap = nap_selector_func;
+}
+
+static void registerGetHttpXffPrecedence(GetHttpXffPrecedenceFunc fn)
+{
+    if (!getHttpXffPrecedenceFunc) getHttpXffPrecedenceFunc = fn;
+}
+
+static char** getHttpXffPrecedence(void* ssn, uint32_t flags, int* nFields)
+{
+    if (getHttpXffPrecedenceFunc) return getHttpXffPrecedenceFunc(ssn, flags, nFields);
+    else return NULL;
 }
 
 #ifdef SNORT_RELOAD

@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -120,6 +120,7 @@ struct AppidStaticConfig
     unsigned chp_body_collection_max;
     unsigned max_tp_flow_depth;
     unsigned tp_allow_probes;
+    bool http2_detection_enabled;    // internal HTTP/2 detection
 };
 typedef struct AppidStaticConfig tAppidStaticConfig;
 

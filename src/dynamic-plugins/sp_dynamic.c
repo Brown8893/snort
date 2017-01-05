@@ -17,7 +17,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * Author: Steven Sturges
@@ -754,6 +754,11 @@ int DynamicHasContent(OptTreeNode *otn)
 int DynamicHasByteTest(OptTreeNode *otn)
 {
     return DynamicHasOption(otn, OPTION_TYPE_BYTE_TEST, 0);
+}
+
+int DynamicHasByteMath(OptTreeNode *otn)
+{
+    return DynamicHasOption(otn, OPTION_TYPE_BYTE_MATH, 0);
 }
 
 int DynamicHasPCRE(OptTreeNode *otn)

@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -79,7 +79,7 @@ typedef struct _SERVICE_RTMP_DATA
 } ServiceRTMPData;
 
 static int rtmp_init(const InitServiceAPI * const api);
-MakeRNAServiceValidationPrototype(rtmp_validate);
+static int rtmp_validate(ServiceValidationArgs* args);
 
 static tRNAServiceElement svc_element =
 {
@@ -439,9 +439,13 @@ parse_rtmp_message_fail:
     goto parse_rtmp_message_done;
 }
 
-MakeRNAServiceValidationPrototype(rtmp_validate)
+static int rtmp_validate(ServiceValidationArgs* args)
 {
     ServiceRTMPData *ss;
+    tAppIdData *flowp = args->flowp;
+    const uint8_t *data = args->data;
+    const int dir = args->dir;
+    uint16_t size = args->size;
 
     if (!size)
         goto inprocess;
@@ -459,11 +463,11 @@ MakeRNAServiceValidationPrototype(rtmp_validate)
         }
     }
 
-    /* Consume this packet. */
-    while (size > 0)
+    /* Client -> Server */
+    if (dir == APP_ID_FROM_INITIATOR)
     {
-        /* Client -> Server */
-        if (dir == APP_ID_FROM_INITIATOR)
+        /* Consume this packet. */
+        while (size > 0)
         {
             switch (ss->client_state)
             {
@@ -549,9 +553,13 @@ MakeRNAServiceValidationPrototype(rtmp_validate)
                     goto fail;    /* No reason to ever get here. */
             }
         }
+    }
 
-        /* Server -> Client */
-        else if (dir == APP_ID_FROM_RESPONDER)
+    /* Server -> Client */
+    else if (dir == APP_ID_FROM_RESPONDER)
+    {
+        /* Consume this packet. */
+        while (size > 0)
         {
             switch (ss->server_state)
             {
@@ -651,14 +659,15 @@ MakeRNAServiceValidationPrototype(rtmp_validate)
     }
 
 inprocess:
-    rtmp_service_mod.api->service_inprocess(flowp, pkt, dir, &svc_element);
+    rtmp_service_mod.api->service_inprocess(flowp, args->pkt, dir, &svc_element);
     return SERVICE_INPROCESS;
 
 fail:
     free(ss->swfUrl);
     free(ss->pageUrl);
     ss->swfUrl = ss->pageUrl = NULL;
-    rtmp_service_mod.api->fail_service(flowp, pkt, dir, &svc_element, rtmp_service_mod.flow_data_index, pConfig);
+    rtmp_service_mod.api->fail_service(flowp, args->pkt, dir, &svc_element,
+                                       rtmp_service_mod.flow_data_index, args->pConfig);
     return SERVICE_NOMATCH;
 
 success:
@@ -693,7 +702,7 @@ success:
             free(ss->pageUrl);
         ss->pageUrl = NULL;
     }
-    rtmp_service_mod.api->add_service(flowp, pkt, dir, &svc_element,
+    rtmp_service_mod.api->add_service(flowp, args->pkt, dir, &svc_element,
                                       APP_ID_RTMP, NULL, NULL, NULL);
     return SERVICE_SUCCESS;
 }

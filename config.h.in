@@ -37,6 +37,12 @@
 /* DAQ version supports address space ID in header. */
 #undef HAVE_DAQ_ADDRESS_SPACE_ID
 
+/* DAQ version supports data channel. */
+#undef HAVE_DAQ_DATA_CHANNEL_PARAMS
+
+/* DAQ version supports separate IP versions on pinhole endpoints. */
+#undef HAVE_DAQ_DATA_CHANNEL_SEPARATE_IP_VERSIONS
+
 /* Define to 1 if you have the `daq_dp_add_dc' function. */
 #undef HAVE_DAQ_DP_ADD_DC
 
@@ -93,6 +99,9 @@
 
 /* Define to 1 if you have the `m' library (-lm). */
 #undef HAVE_LIBM
+
+/* Define to 1 if you have the `nghttp2' library (-lnghttp2). */
+#undef HAVE_LIBNGHTTP2
 
 /* Define to 1 if you have the `nsl' library (-lnsl). */
 #undef HAVE_LIBNSL

@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -244,7 +244,7 @@ static unsigned int getAppIdStaticIndex(tAppId appid)
     return 0;
 }
 
-AppInfoTableEntry* appInfoEntryGet(tAppId appId, tAppIdConfig *pConfig)
+AppInfoTableEntry* appInfoEntryGet(tAppId appId, const tAppIdConfig *pConfig)
 {
     tAppId tmp;
     if ((tmp = getAppIdStaticIndex(appId)))
@@ -286,6 +286,8 @@ AppInfoTableEntry* appInfoEntryCreate(const char *appName, tAppIdConfig *pConfig
             }
 
             dynamicArraySetIndex(pConfig->AppInfoTableDyn, appId, entry);
+            if (pConfig->AppNameHash != NULL)
+                appNameHashAdd(pConfig->AppNameHash, appName, entry);
         }
         else
         {
@@ -438,6 +440,7 @@ void appInfoTableInit(const char *path, tAppIdConfig* pConfig)
     appidStaticConfig.mdns_user_reporting = 1;
     appidStaticConfig.dns_host_reporting = 1;
     appidStaticConfig.max_tp_flow_depth = 5;
+    appidStaticConfig.http2_detection_enabled = 0;
 
     snprintf(filepath, sizeof(filepath), "%s/odp/%s", path, APP_CONFIG_FILE);
     appIdConfLoad (filepath);
@@ -668,8 +671,13 @@ static void appIdConfLoad (const char *path)
             }
             else if (!(strcasecmp(conf_key, "defer_to_thirdparty")))
             {
-                DEBUG_WRAP(DebugMessage(DEBUG_APPID, "AppId: adding app %d to list of apps where we should take thirdpart ID over the NDE's.\n", atoi(conf_val)););
+                DEBUG_WRAP(DebugMessage(DEBUG_APPID, "AppId: adding app %d to list of apps where we should take thirdparty ID over the NDE's.\n", atoi(conf_val)););
                 appInfoEntryFlagSet(atoi(conf_val), APPINFO_FLAG_DEFER, pConfig);
+            }
+            else if (!(strcasecmp(conf_key, "defer_payload_to_thirdparty")))
+            {
+                DEBUG_WRAP(DebugMessage(DEBUG_APPID, "AppId: adding app %d to list of apps where we should take thirdparty payload ID over the NDE's.\n", atoi(conf_val)););
+                appInfoEntryFlagSet(atoi(conf_val), APPINFO_FLAG_DEFER_PAYLOAD, pConfig);
             }
             else if (!(strcasecmp(conf_key, "chp_userid")))
             {
@@ -767,6 +775,28 @@ static void appIdConfLoad (const char *path)
             {
                 _dpd.logMsg("AppId: adding app %d to list of ignore thirdparty apps.\n", atoi(conf_val));
                 appInfoEntryFlagSet(atoi(conf_val), APPINFO_FLAG_IGNORE, pConfig);
+            }
+            else if (!(strcasecmp(conf_key, "http2_detection")))
+            {
+                // This option will control our own HTTP/2 detection.  We can
+                // still be told externally, though, that it's HTTP/2 (either
+                // from HTTP Inspect or 3rd Party).  This is intended to be
+                // used to ask AppID to detect unencrypted HTTP/2 on non-std
+                // ports.
+                if (!(strcasecmp(conf_val, "disabled")))
+                {
+                    _dpd.logMsg("AppId: disabling internal HTTP/2 detection.\n");
+                    appidStaticConfig.http2_detection_enabled = 0;
+                }
+                else if (!(strcasecmp(conf_val, "enabled")))
+                {
+                    _dpd.logMsg("AppId: enabling internal HTTP/2 detection.\n");
+                    appidStaticConfig.http2_detection_enabled = 1;
+                }
+                else
+                {
+                    _dpd.logMsg("AppId: ignoring invalid option for http2_detection: %s\n", conf_val);
+                }
             }
         }
     }

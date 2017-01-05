@@ -1,5 +1,5 @@
 /*
- ** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ ** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  ** Copyright (C) 2012-2013 Sourcefire, Inc.
  **
  ** This program is free software; you can redistribute it and/or modify
@@ -122,10 +122,19 @@ int file_resume_block_add_file(void *pkt, uint32_t file_sig, uint32_t timeout,
     hashKey.file_sig = file_sig;
 
 #ifdef HAVE_DAQ_DP_ADD_DC
-    if (p->packet_flags & PKT_FROM_CLIENT)
-        DAQ_Add_Dynamic_Protocol_Channel(p, srcIP, 0, dstIP, p->dp, GET_IPH_PROTO(p));
-    else if (p->packet_flags & PKT_FROM_SERVER)
-        DAQ_Add_Dynamic_Protocol_Channel(p, dstIP, 0, srcIP, p->sp, GET_IPH_PROTO(p));
+    {
+        DAQ_DC_Params params;
+
+        memset(&params, 0, sizeof(params));
+        params.flags = DAQ_DC_ALLOW_MULTIPLE | DAQ_DC_PERSIST;
+        params.timeout_ms = 5 * 60 * 1000; /* 5 minutes */
+        if (p->packet_flags & PKT_FROM_CLIENT)
+            DAQ_Add_Dynamic_Protocol_Channel(p, srcIP, 0, dstIP, p->dp, GET_IPH_PROTO(p),
+                                             &params);
+        else if (p->packet_flags & PKT_FROM_SERVER)
+            DAQ_Add_Dynamic_Protocol_Channel(p, dstIP, 0, srcIP, p->sp, GET_IPH_PROTO(p),
+                                             &params);
+    }
 #endif
 
     hash_node = sfxhash_find_node(fileHash, &hashKey);

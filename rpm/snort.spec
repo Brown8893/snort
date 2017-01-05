@@ -47,12 +47,12 @@
 
 %if %{openappid}
 Name: %{realname}-openappid
-Version: 2.9.8.3
+Version: 2.9.9.0
 Summary: An open source Network Intrusion Detection System (NIDS) with open AppId support
 Conflicts: %{realname}
 %else
 Name: %{realname}
-Version: 2.9.8.3
+Version: 2.9.9.0
 Summary: An open source Network Intrusion Detection System (NIDS)
 Conflicts: %{realname}-openappid
 %endif
@@ -189,7 +189,7 @@ InstallSnort() {
    fi
    if [ "$1" = "openappid" ]; then
 	%__install -p -m 0755 "$1"/tools/u2openappid/u2openappid $RPM_BUILD_ROOT%{_bindir}/u2openappid
-        # This isn't built, it has to be copied from the source tree	 
+        # This isn't built, it has to be copied from the source tree
         %__install -p -m 0755 tools/appid_detector_builder.sh $RPM_BUILD_ROOT%{_bindir}/appid_detector_builder.sh
    fi
 }

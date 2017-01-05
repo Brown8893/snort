@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2003-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -161,7 +161,11 @@ static HI_EVENT_INFO server_event_info[HI_EO_SERVER_EVENT_NUM] = {
     {HI_EO_SERVER_PDF_PARSE_FAILURE, HI_EO_MED_PRIORITY,
         HI_EO_SERVER_PDF_PARSE_FAILURE_STR},
     {HI_EO_SERVER_PROTOCOL_OTHER, HI_EO_MED_PRIORITY,
-        HI_EO_SERVER_PROTOCOL_OTHER_STR}
+        HI_EO_SERVER_PROTOCOL_OTHER_STR},
+    {HI_EO_SERVER_MULTIPLE_CONTLEN, HI_EO_HIGH_PRIORITY,
+        HI_EO_SERVER_MULTIPLE_CONTLEN_STR},
+    {HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING, HI_EO_HIGH_PRIORITY,
+        HI_EO_SERVER_MULTIPLE_CONTENT_ENCODING_STR}
 };
 
 /*

@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -24,7 +24,6 @@
 
 #include <stdint.h>
 #include <time.h>
-
 #include "sf_snort_packet.h"
 #include "flow_error.h"
 #include "appId.h"
@@ -47,18 +46,6 @@
 #define APPID_SESSION_DATA_SERVICE_MODSTATE_BIT  0x20000000
 #define APPID_SESSION_DATA_CLIENT_MODSTATE_BIT   0x40000000
 #define APPID_SESSION_DATA_DETECTOR_MODSTATE_BIT 0x80000000
-
-/* AppId Session internal flags */
-typedef enum {
-    APPID_SESSION_APP_REINSPECT         = (1 << 0),
-    APPID_SESSION_RESPONSE_CODE_CHECKED = (1 << 1),
-    APPID_SESSION_REXEC_STDERR          = (1 << 2),
-    APPID_SESSION_CHP_INSPECTING        = (1 << 3),
-    APPID_SESSION_STICKY_SERVICE        = (1 << 4),
-    APPID_SESSION_APP_REINSPECT_SSL     = (1 << 5),
-    APPID_SESSION_APP_NO_TPI            = (1 << 6),
-} tFlowFlags;
-
 
 #define APPID_SESSION_BIDIRECTIONAL_CHECKED  (APPID_SESSION_INITIATOR_CHECKED | APPID_SESSION_RESPONDER_CHECKED)
 #define APPID_SESSION_DO_RNA (APPID_SESSION_RESPONDER_MONITORED | APPID_SESSION_INITIATOR_MONITORED | APPID_SESSION_DISCOVER_USER | APPID_SESSION_SPECIAL_MONITORED)
@@ -99,11 +86,9 @@ typedef struct _tCommonAppIdData
 {
     APPID_SESSION_STRUCT_FLAG fsf_type;  /* This must be first. */
     unsigned policyId;
-    //flags not seen by other preprocessors
-    unsigned internalFlags;
     //flags shared with other preprocessor via session attributes.
-    unsigned externalFlags;
-    sfaddr_t initiator_ip;
+    uint64_t flags;
+    struct in6_addr initiator_ip;
     uint16_t initiator_port;
 } tCommonAppIdData;
 
@@ -134,32 +119,46 @@ typedef struct _fflow_info
     int flow_prepared;
 } fflow_info;
 
+typedef struct _httpFields
+{
+    char *str;
+} HttpRewriteableFields;
+
 typedef struct _httpSession
 {
     char *host;
+    uint16_t host_buflen;
     char *url;
     char *uri;
+    uint16_t uri_buflen;
     char *via;
     char *useragent;
+    uint16_t useragent_buflen;
     char *response_code;
+    uint16_t response_code_buflen;
     char *referer;
+    uint16_t referer_buflen;
     char *cookie;
+    uint16_t cookie_buflen;
     char *content_type;
+    uint16_t content_type_buflen;
     char *location;
+    uint16_t location_buflen;
     char *body;
+    uint16_t body_buflen;
     char *req_body;
+    uint16_t req_body_buflen;
     char *server;
     char *x_working_with;
-    char *new_url;
-    char *new_cookie;
+    char *new_field[HTTP_FIELD_MAX+1];
+    uint16_t new_field_len[HTTP_FIELD_MAX+1];
 
-    uint16_t uriOffset;
-    uint16_t uriEndOffset;
-    uint16_t cookieOffset;
-    uint16_t cookieEndOffset;
+    uint16_t fieldOffset[HTTP_FIELD_MAX+1];
+    uint16_t fieldEndOffset[HTTP_FIELD_MAX+1];
 
     fflow_info *fflow;
 
+    bool new_field_contents;
     int chp_finished;
     tAppId chp_candidate;
     tAppId chp_alt_candidate;
@@ -170,9 +169,11 @@ typedef struct _httpSession
     int num_matches;
     int num_scans;
     int get_offsets_from_rebuilt;
-    SEARCH_SUPPORT_TYPE search_support_type;
     bool skip_simple_detect;    // Flag to indicate if simple detection of client ID, payload ID, etc
                                 // should be skipped
+    sfaddr_t* xffAddr;
+    char** xffPrecedence;
+    int numXffFields;
 
 #if RESPONSE_CODE_PACKET_THRESHHOLD
     unsigned response_code_packets;
@@ -267,14 +268,6 @@ typedef struct AppIdData
     httpSession *hsession;
     tlsSession  *tsession;
 
-#if 0
-    char *host;
-    char *url;
-    char *via;
-    char *useragent;
-    char *response_code;
-    char *referer;
-#endif
     unsigned scan_flags;
 #if RESPONSE_CODE_PACKET_THRESHHOLD
     unsigned response_code_packets;
@@ -328,6 +321,9 @@ typedef struct AppIdData
     void * firewallEarlyData;
     tAppId pastIndicator;
     tAppId pastForecast;
+
+    bool is_http2;
+    SEARCH_SUPPORT_TYPE search_support_type;
 } tAppIdData;
 /**
  * Mark a flow with a particular flag
@@ -335,13 +331,9 @@ typedef struct AppIdData
  * @param flow
  * @param flags
  */
-static inline void setAppIdIntFlag(tAppIdData *flow, unsigned flags)
+static inline void setAppIdFlag(tAppIdData *flow, uint64_t flags)
 {
-    flow->common.internalFlags |= flags;
-}
-static inline void setAppIdExtFlag(tAppIdData *flow, unsigned flags)
-{
-    flow->common.externalFlags |= flags;
+    flow->common.flags |= flags;
 }
 
 /**
@@ -350,13 +342,9 @@ static inline void setAppIdExtFlag(tAppIdData *flow, unsigned flags)
  * @param flow
  * @param flags
  */
-static inline void clearAppIdIntFlag(tAppIdData *flow, unsigned flags)
+static inline void clearAppIdFlag(tAppIdData *flow, uint64_t flags)
 {
-    flow->common.internalFlags &= ~flags;
-}
-static inline void clearAppIdExtFlag(tAppIdData *flow, unsigned flags)
-{
-    flow->common.externalFlags &= ~flags;
+    flow->common.flags &= ~flags;
 }
 
 /**
@@ -365,13 +353,9 @@ static inline void clearAppIdExtFlag(tAppIdData *flow, unsigned flags)
  * @param flow
  * @param flags
  */
-static inline unsigned getAppIdIntFlag(tAppIdData *flow, unsigned flags)
+static inline uint64_t getAppIdFlag(tAppIdData *flow, uint64_t flags)
 {
-    return (flow->common.internalFlags & flags);
-}
-static inline unsigned getAppIdExtFlag(tAppIdData *flow, unsigned flags)
-{
-    return (flow->common.externalFlags & flags);
+    return (flow->common.flags & flags);
 }
 
 void AppIdFlowdataFree(tAppIdData *flowp);

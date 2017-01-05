@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -77,6 +77,10 @@ int popDetectCalled = 0;
 
 #include "file_api.h"
 
+#ifdef DUMP_BUFFER
+#include "pop_buffer_dump.h"
+#endif
+
 const int MAJOR_VERSION = 1;
 const int MINOR_VERSION = 0;
 const int BUILD_VERSION = 1;
@@ -136,6 +140,11 @@ void SetupPOP(void)
     _dpd.registerPreproc("pop", POPInit, POPReload,
                          POPReloadVerify, POPReloadSwap, POPReloadSwapFree);
 #endif
+#ifdef DUMP_BUFFER
+    _dpd.registerBufferTracer(getPOPBuffers, POP_BUFFER_DUMP_FUNC);
+#endif
+
+
 }
 
 

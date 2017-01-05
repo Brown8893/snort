@@ -1,7 +1,7 @@
 /* $Id */
 
 /*
- ** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ ** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  ** Copyright (C) 2011-2013 Sourcefire, Inc.
  **
  **
@@ -57,6 +57,10 @@
 #endif
 #include <stdlib.h>
 #include <ctype.h>
+
+#ifdef DUMP_BUFFER
+#include "gtp_buffer_dump.h"
+#endif
 
 #include "profiler.h"
 #ifdef PERF_PROFILING
@@ -136,6 +140,9 @@ void SetupGTP(void)
 #else
     _dpd.registerPreproc("gtp", GTPInit, GTPReload,
             GTPReloadVerify, GTPReloadSwap, GTPReloadSwapFree);
+#endif
+#ifdef DUMP_BUFFER
+    _dpd.registerBufferTracer(getGTPBuffers, GTP_BUFFER_DUMP_FUNC);
 #endif
 }
 
@@ -302,6 +309,12 @@ static void GTPmain( void* ipacketp, void* contextp )
 
     packetp = (SFSnortPacket*) ipacketp;
     sfPolicyUserPolicySet (gtp_config, policy_id);
+
+#ifdef DUMP_BUFFER
+    dumpBufferInit();
+    dumpBuffer(PAYLOAD_DUMP,packetp->payload,packetp->payload_size);
+#endif
+
 
     // precoditions - what we registered for
     assert(IsUDP(packetp) && packetp->payload && packetp->payload_size);

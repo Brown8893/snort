@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2003-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -41,6 +41,12 @@ extern MemPool *mime_log_mempool;
 
 extern DataBuffer HttpDecodeBuf;
 
+#ifdef PERF_PROFILING
+extern PreprocStats hi2PerfStats;
+extern PreprocStats hi2InitPerfStats;
+extern PreprocStats hi2PayloadPerfStats;
+extern PreprocStats hi2PseudoPerfStats;
+#endif
 /**
 **  The definition of the configuration separators in the snort.conf
 **  configure line.
@@ -106,6 +112,12 @@ typedef struct s_DECOMPRESS_STATE
     DecompressStage stage;
 } DECOMPRESS_STATE;
 
+typedef enum _ChunkLenState
+{
+    CHUNK_LEN_DEFAULT = 0,
+    CHUNK_LEN_INCOMPLETE
+} ChunkLenState;
+
 typedef struct s_HTTP_RESP_STATE
 {
     uint8_t inspect_body;
@@ -118,6 +130,8 @@ typedef struct s_HTTP_RESP_STATE
     uint32_t max_seq;
     bool flow_depth_excd;
     bool eoh_found;
+    bool look_for_partial_content;
+    uint8_t chunk_len_state;
 }HTTP_RESP_STATE;
 
 typedef struct s_HTTP_LOG_STATE
@@ -227,6 +241,7 @@ void HI_SearchInit(void);
 void HI_SearchFree(void);
 int HI_SearchStrFound(void *, void *, int , void *, void *);
 int GetHttpFlowDepth(void *, uint32_t);
+bool isHttpRespPartialCont(void *data);
 
 static inline HttpSessionData * GetHttpSessionData(Packet *p)
 {

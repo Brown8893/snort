@@ -1,7 +1,7 @@
 /* $Id$ */
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -1622,6 +1622,9 @@ static ENC_STATUS MPLS_Encode (EncState* enc, Buffer* in, Buffer* out)
 {
    uint16_t n;
    uint8_t* hi = NULL;
+   uint8_t* ho;
+   PROTO_ID next;
+
    SessionControlBlock* scb = (SessionControlBlock*)(enc->p->ssnptr);
 
    if ( FORWARD(enc) )
@@ -1645,8 +1648,8 @@ static ENC_STATUS MPLS_Encode (EncState* enc, Buffer* in, Buffer* out)
        n  = enc->p->layers[enc->layer-1].length;
        hi = enc->p->layers[enc->layer-1].start;
    }
-   uint8_t* ho = (uint8_t*)(out->base + out->end);
-   PROTO_ID next = NextEncoder(enc);
+   ho = (uint8_t*)(out->base + out->end);
+   next = NextEncoder(enc);
 
    UPDATE_BOUND(out, n);
    memcpy(ho, hi, n);

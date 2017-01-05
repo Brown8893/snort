@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -173,7 +173,7 @@ typedef struct _SERVICE_SIP_DATA
 } ServiceSIPData;
 
 static int sip_service_init(const InitServiceAPI * const init_api);
-MakeRNAServiceValidationPrototype(sip_service_validate);
+static int sip_service_validate(ServiceValidationArgs* args);
 
 static tRNAServiceElement svc_element =
 {
@@ -194,11 +194,10 @@ static RNAServiceValidationPort pp[] =
 
 SF_SO_PUBLIC tRNAServiceValidationModule sip_service_mod =
 {
-    svc_name,
-    &sip_service_init,
-    pp,
-    NULL,
-    1
+    .name = svc_name,
+    .init = &sip_service_init,
+    .pp = pp,
+    .provides_user = 1
 };
 
 static CLIENT_APP_RETCODE sip_client_init(const InitClientAppAPI * const init_api, SF_LIST *config)
@@ -315,7 +314,7 @@ static CLIENT_APP_RETCODE sip_client_validate(const uint8_t *data, uint16_t size
             return CLIENT_APP_ENOMEM;
         }
         fd->owner = &sip_udp_client_mod;
-        setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
+        setAppIdFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
     }
 
     return CLIENT_APP_INPROCESS;
@@ -520,9 +519,7 @@ static void createRtpFlow(tAppIdData *flowp, SFSnortPacket *pkt, sfaddr_t *cliIp
         fp->clientAppId = flowp->clientAppId;
         fp->payloadAppId = flowp->payloadAppId;
         fp->serviceAppId = APP_ID_RTP;
-        setAppIdExtFlag(fp, APPID_SESSION_SERVICE_DETECTED | APPID_SESSION_NOT_A_SERVICE | APPID_SESSION_PORT_SERVICE_DONE);
-        fp->rnaServiceState = RNA_STATE_FINISHED;
-        fp->rnaClientState = RNA_STATE_FINISHED;
+        PopulateExpectedFlow(flowp, fp, APPID_SESSION_IGNORE_ID_FLAGS);
     }
 
     // create an RTCP flow as well
@@ -533,9 +530,7 @@ static void createRtpFlow(tAppIdData *flowp, SFSnortPacket *pkt, sfaddr_t *cliIp
         fp2->clientAppId = flowp->clientAppId;
         fp2->payloadAppId = flowp->payloadAppId;
         fp2->serviceAppId = APP_ID_RTCP;
-        setAppIdExtFlag(fp2, APPID_SESSION_SERVICE_DETECTED | APPID_SESSION_NOT_A_SERVICE | APPID_SESSION_PORT_SERVICE_DONE);
-        fp2->rnaServiceState = RNA_STATE_FINISHED;
-        fp2->rnaClientState = RNA_STATE_FINISHED;
+        PopulateExpectedFlow(flowp, fp2, APPID_SESSION_IGNORE_ID_FLAGS);
     }
 }
 
@@ -592,7 +587,7 @@ static void SipSessionCbClientProcess (SFSnortPacket *p, const SipHeaders *heade
             return;
         }
         fd->owner = &sip_udp_client_mod;
-        setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
+        setAppIdFlag(flowp, APPID_SESSION_CLIENT_GETS_SERVER_PACKETS);
     }
 
     if (fd->owner != &sip_udp_client_mod && fd->owner != &sip_tcp_client_mod)
@@ -644,7 +639,7 @@ success:
     if(fd->userName)
         sip_udp_client_mod.api->add_user(flowp, (char *)fd->userName, APP_ID_SIP, 1);
 
-    setAppIdExtFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
+    setAppIdFlag(flowp, APPID_SESSION_CLIENT_DETECTED);
 }
 
 static void SipSessionCbServiceProcess (SFSnortPacket *p, const SipHeaders *headers, const SipDialog *dialog, tAppIdData *flowp)
@@ -691,9 +686,9 @@ static void SipSessionCbServiceProcess (SFSnortPacket *p, const SipHeaders *head
 
     if (dialog->state == SIP_DLG_ESTABLISHED)
     {
-        if (!getAppIdExtFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
+        if (!getAppIdFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
         {
-            setAppIdExtFlag(flowp, APPID_SESSION_CONTINUE);
+            setAppIdFlag(flowp, APPID_SESSION_CONTINUE);
             sip_service_mod.api->add_service(flowp, p, direction, &svc_element,
                     APP_ID_SIP, ss->vendor[0] ? ss->vendor:NULL,
                     NULL, NULL);
@@ -765,9 +760,10 @@ static int sip_service_init(const InitServiceAPI * const init_api)
     return 0;
 }
 
-MakeRNAServiceValidationPrototype(sip_service_validate)
+static int sip_service_validate(ServiceValidationArgs* args)
 {
     ServiceSIPData *ss;
+    tAppIdData *flowp = args->flowp;
 
     ss = sip_service_mod.api->data_get(flowp, sip_service_mod.flow_data_index);
     if (!ss)
@@ -782,24 +778,25 @@ MakeRNAServiceValidationPrototype(sip_service_validate)
         }
     }
 
-    if (size && dir == APP_ID_FROM_RESPONDER)
+    if (args->size && args->dir == APP_ID_FROM_RESPONDER)
     {
         ss->serverPkt++;
     }
 
     if (ss->serverPkt > 10)
     {
-        if (!getAppIdExtFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
+        if (!getAppIdFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
         {
-            sip_service_mod.api->fail_service(flowp, pkt, dir, &svc_element, sip_service_mod.flow_data_index, pConfig);
+            sip_service_mod.api->fail_service(flowp, args->pkt, args->dir, &svc_element,
+                                              sip_service_mod.flow_data_index, args->pConfig);
         }
-        clearAppIdExtFlag(flowp, APPID_SESSION_CONTINUE);
+        clearAppIdFlag(flowp, APPID_SESSION_CONTINUE);
         return SERVICE_NOMATCH;
     }
 
-    if (!getAppIdExtFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
+    if (!getAppIdFlag(flowp, APPID_SESSION_SERVICE_DETECTED))
     {
-        sip_service_mod.api->service_inprocess(flowp, pkt, dir, &svc_element);
+        sip_service_mod.api->service_inprocess(flowp, args->pkt, args->dir, &svc_element);
     }
 
     return SERVICE_INPROCESS;

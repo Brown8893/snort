@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -32,6 +32,7 @@
 #include "http_url_patterns.h"
 #include "detector_http.h"
 #include "fw_appid.h"
+#include "client_app_base.h"
 
 /* URL line patterns for identifying client */
 #define HTTP_GET "GET "
@@ -169,12 +170,6 @@ typedef struct _MatchedPatterns {
     int index;
     struct _MatchedPatterns *next;
 } MatchedPatterns;
-
-typedef struct _MatchedCHPAction {
-    CHPAction *mpattern;
-    int index;
-    struct _MatchedCHPAction *next;
-} MatchedCHPAction;
 
 static DetectorHTTPPattern content_type_patterns[] =
 {
@@ -403,31 +398,112 @@ static int content_pattern_match(void* id, void *unused_tree, int index, void* d
 
 static int chp_pattern_match(void *id, void *unused_tree, int index, void *data, void *unused_neg)
 {
-    MatchedCHPAction *cm = NULL;
-    MatchedCHPAction **tmp;
+    MatchedCHPAction *new_match;
+    MatchedCHPAction *current_search;
+    MatchedCHPAction *prev_search;
     MatchedCHPAction **matches = (MatchedCHPAction **)data;
     CHPAction *target = (CHPAction *)id;
 
-    // preserving order is probably the right thing here
-    for (tmp = matches; *tmp; tmp = &(*tmp)->next)
+    if (!(new_match = (MatchedCHPAction *)malloc(sizeof(MatchedCHPAction))))
+        return 1;
+
+    new_match->mpattern = target;
+    new_match->index = index;
+
+    // preserving order is required: sort by appIdInstance, then by precedence
+    for (current_search = *matches, prev_search = NULL;
+          NULL != current_search;
+          prev_search = current_search, current_search = current_search->next)
     {
-        cm = *tmp;
+        register CHPAction *match_data = current_search->mpattern;
+        if (target->appIdInstance < match_data->appIdInstance)
+            break;
+        if (target->appIdInstance == match_data->appIdInstance)
+        {
+            if (target->precedence < match_data->precedence)
+                break;
+        }
     }
 
-    if (!*tmp)
+
+    if (prev_search)
     {
-        if (!(cm = (MatchedCHPAction *)malloc(sizeof(MatchedCHPAction))))
-            return 1;
-        else
-        {
-            cm->mpattern = target;
-            cm->index = index;
-            cm->next = NULL;
-            *tmp = cm;
-        }
+        new_match->next = prev_search->next;
+        prev_search->next = new_match;
+    }
+    else
+    {
+        // insert at head of list.
+        new_match->next = *matches;
+        *matches = new_match;
     }
     return 0;
 }
+
+#define CHP_TALLY_GROWTH_FACTOR  10
+static inline void chp_add_candidate_to_tally( CHPMatchTally **ppTally, CHPApp *chpapp )
+{
+    int index;
+    CHPMatchTally *pTally = *ppTally;
+    if (!pTally)
+    {
+        pTally = (CHPMatchTally *)malloc(sizeof(CHPMatchTally)+CHP_TALLY_GROWTH_FACTOR*sizeof(CHPMatchCandidate));
+        if (!pTally)
+            return;
+        pTally->in_use_elements = 0;
+        pTally->allocated_elements = CHP_TALLY_GROWTH_FACTOR;
+        *ppTally = pTally;
+    }
+    for (index=0; index < pTally->in_use_elements; index++ )
+    {
+        if (chpapp == pTally->item[index].chpapp)
+        {
+            pTally->item[index].key_pattern_countdown--;
+            return;
+        }
+    }
+    // Not found. Add to array
+    if (pTally->in_use_elements == pTally->allocated_elements)
+    {
+        int newCount = pTally->allocated_elements + CHP_TALLY_GROWTH_FACTOR;
+        CHPMatchTally *pNewTally = (CHPMatchTally *)realloc( pTally, sizeof(CHPMatchTally)+newCount*sizeof(CHPMatchCandidate));
+        if (pNewTally)
+        {
+            *ppTally = pTally = pNewTally;
+            pTally->allocated_elements = newCount;
+        }
+        else
+            return; // failed to allocate a bigger chunk
+    }
+    // index == pTally->in_use_elements
+    pTally->in_use_elements++;
+    pTally->item[index].chpapp = chpapp;
+    pTally->item[index].key_pattern_length_sum = chpapp->key_pattern_length_sum;
+    pTally->item[index].key_pattern_countdown = chpapp->key_pattern_count - 1; // the count would have included this find.
+}
+
+typedef struct _CHPTallyAndActions {
+    CHPMatchTally *pTally;
+    MatchedCHPAction *matches;
+} CHPTallyAndActions;
+
+// In addition to creating the linked list of matching actions this function will
+// create the CHPMatchTally needed to find the longest matching pattern.
+static int chp_key_pattern_match(void *id, void *unused_tree, int index, void *data, void *unused_neg)
+{
+    CHPTallyAndActions *pTallyAndActions = (CHPTallyAndActions*)data;
+    CHPAction *target = (CHPAction *)id;
+
+    if (target->key_pattern)
+    {
+        // We have a match from a key pattern. We need to have it's parent chpapp represented in the tally.
+        // If the chpapp has never been seen then add an item to the tally's array
+        // else decrement the count of expected key_patterns until zero so that we know when we have them all.
+        chp_add_candidate_to_tally( &pTallyAndActions->pTally, target->chpapp );
+    }
+    return chp_pattern_match(id, unused_tree, index, &pTallyAndActions->matches, unused_neg);
+}
+
 
 static int http_pattern_match(void* id, void *unused_tree, int index, void* data, void *unused_neg)
 {
@@ -656,6 +732,123 @@ static void* registerHeaderPatterns(
 
     return patternMatcher;
 }
+#define HTTP_FIELD_PREFIX_USER_AGENT    "\r\nUser-Agent: "
+#define HTTP_FIELD_PREFIX_USER_AGENT_SIZE (sizeof(HTTP_FIELD_PREFIX_USER_AGENT)-1)
+#define HTTP_FIELD_PREFIX_HOST    "\r\nHost: "
+#define HTTP_FIELD_PREFIX_HOST_SIZE (sizeof(HTTP_FIELD_PREFIX_HOST)-1)
+#define HTTP_FIELD_PREFIX_REFERER    "\r\nReferer: "
+#define HTTP_FIELD_PREFIX_REFERER_SIZE (sizeof(HTTP_FIELD_PREFIX_REFERER)-1)
+#define HTTP_FIELD_PREFIX_URI    " "
+#define HTTP_FIELD_PREFIX_URI_SIZE (sizeof(HTTP_FIELD_PREFIX_URI)-1)
+#define HTTP_FIELD_PREFIX_COOKIE    "\r\nCookie: "
+#define HTTP_FIELD_PREFIX_COOKIE_SIZE (sizeof(HTTP_FIELD_PREFIX_COOKIE)-1)
+
+typedef struct _FIELD_PATTERN
+{
+    PatternType patternType;
+    uint8_t *data;
+    unsigned length;
+} FieldPattern;
+
+static FieldPattern http_field_patterns[] =
+{
+    {URI_PT, (uint8_t *) HTTP_FIELD_PREFIX_URI, HTTP_FIELD_PREFIX_URI_SIZE},
+    {HOST_PT, (uint8_t *) HTTP_FIELD_PREFIX_HOST,HTTP_FIELD_PREFIX_HOST_SIZE},
+    {REFERER_PT, (uint8_t *) HTTP_FIELD_PREFIX_REFERER, HTTP_FIELD_PREFIX_REFERER_SIZE},
+    {COOKIE_PT, (uint8_t *) HTTP_FIELD_PREFIX_COOKIE, HTTP_FIELD_PREFIX_COOKIE_SIZE},
+    {AGENT_PT, (uint8_t *) HTTP_FIELD_PREFIX_USER_AGENT,HTTP_FIELD_PREFIX_USER_AGENT_SIZE},
+};
+
+static void* processHttpFieldPatterns(
+        FieldPattern* patternList,
+        size_t patternListCount)
+{
+    void *patternMatcher;
+    u_int32_t i;
+
+    if (!(patternMatcher = _dpd.searchAPI->search_instance_new_ex(MPSE_ACF)))
+        return NULL;
+
+    for (i=0; i < patternListCount; i++)
+    {
+        /* add patterns with case sensitivity */
+        _dpd.searchAPI->search_instance_add_ex(patternMatcher,
+                (char  *)patternList[i].data,
+                patternList[i].length,
+                &patternList[i],
+                STR_SEARCH_CASE_SENSITIVE);
+    }
+
+    _dpd.searchAPI->search_instance_prep(patternMatcher);
+
+    return patternMatcher;
+}
+
+typedef struct fieldPatternData_t
+{
+    const uint8_t *payload;
+    unsigned length;
+    httpSession *hsession;
+} FieldPatternData;
+
+static int http_field_pattern_match(void *id, void *unused_tree, int index, void *data, void *unused_neg)
+{
+    static const uint8_t crlf[] = "\r\n";
+    static unsigned crlfLen = sizeof(crlf)-1;
+    FieldPatternData *pFieldData = (FieldPatternData*)data;
+    FieldPattern *target = (FieldPattern  *)id;
+    const uint8_t* p;
+    unsigned fieldOffset = target->length + index;
+    unsigned remainingLength = pFieldData->length - fieldOffset;
+
+    if (!(p = (uint8_t *)service_strstr(&pFieldData->payload[fieldOffset], remainingLength, crlf, crlfLen)))
+    {
+        return 1;
+    }
+    pFieldData->hsession->fieldOffset[target->patternType] = (uint16_t)fieldOffset;
+    pFieldData->hsession->fieldEndOffset[target->patternType] = p - pFieldData->payload;
+    return 1;
+}
+
+void httpGetNewOffsetsFromPacket(SFSnortPacket *pkt, httpSession *hsession, tAppIdConfig *pConfig)
+{
+#define MIN_HTTP_REQ_HEADER_SIZE (sizeof("GET /\r\n\r\n")-1)
+    static const uint8_t crlfcrlf[] = "\r\n\r\n";
+    static unsigned crlfcrlfLen = sizeof(crlfcrlf)-1;
+    tDetectorHttpConfig *pHttpConfig = &pConfig->detectorHttpConfig;
+    const uint8_t* p;
+    uint8_t *headerEnd;
+    PatternType fieldId;
+    FieldPatternData patternMatchData;
+
+    for (fieldId = AGENT_PT; fieldId <= COOKIE_PT; fieldId++)
+    {
+        // clear offset for default case;
+        hsession->fieldOffset[fieldId] = 0;
+    }
+
+    if (!pkt || !pkt->payload || pkt->payload_size < MIN_HTTP_REQ_HEADER_SIZE)
+        return;
+
+    p = pkt->payload;
+
+    patternMatchData.hsession = hsession;
+    patternMatchData.payload = p;
+
+    if (!(headerEnd = (uint8_t *)service_strstr(p, pkt->payload_size, crlfcrlf, crlfcrlfLen)))
+        return;
+
+
+    headerEnd += crlfcrlfLen;
+    patternMatchData.length = (unsigned)(headerEnd - p);
+
+    _dpd.searchAPI->search_instance_find_all(pHttpConfig->field_matcher,
+                   (char *)p,
+                   patternMatchData.length, 0,
+                   &http_field_pattern_match,
+                   (void *)(&patternMatchData));
+
+}
 
 int http_detector_finalize(tAppIdConfig *pConfig)
 {
@@ -695,6 +888,11 @@ int http_detector_finalize(tAppIdConfig *pConfig)
     numPatterns = sizeof(content_type_patterns)/sizeof(*content_type_patterns);
     pHttpConfig->content_type_matcher = processContentTypePatterns(content_type_patterns, numPatterns, patternLists->contentTypePatternList, &ctc);
     if (!pHttpConfig->content_type_matcher)
+        return -1;
+
+    numPatterns = sizeof(http_field_patterns)/sizeof(*http_field_patterns);
+    pHttpConfig->field_matcher = processHttpFieldPatterns(http_field_patterns, numPatterns);
+    if (!pHttpConfig->field_matcher)
         return -1;
 
     if (!processCHPList(patternLists->chpList, pHttpConfig)) return -1;
@@ -738,6 +936,11 @@ void http_detector_clean(tDetectorHttpConfig *pHttpConfig)
     {
         _dpd.searchAPI->search_instance_free(pHttpConfig->content_type_matcher);
         pHttpConfig->content_type_matcher = NULL;
+    }
+    if (pHttpConfig->field_matcher)
+    {
+        _dpd.searchAPI->search_instance_free(pHttpConfig->field_matcher);
+        pHttpConfig->field_matcher = NULL;
     }
     if (pHttpConfig->chp_user_agent_matcher)
      {
@@ -797,50 +1000,59 @@ static inline void FreeMatchStructures(MatchedPatterns *mp)
     }
 }
 
-static inline void FreeMatchedCHPActions(MatchedCHPAction *ma)
-{
-    MatchedCHPAction *tmp;
-
-    while(ma)
-    {
-        tmp = ma;
-        ma = ma->next;
-        free(tmp);
-    }
-}
-
 static void rewriteCHP (const char *buf, int bs, int start,
                         int psize, char *adata, char **outbuf,
                         int insert)
 {
-    int bufoff, outoff, aoff, maxs, bufcont, as;
+    int maxs, bufcont, as;
+    char *copyPtr;
 
-    // we don't want to insert a string that is already present
-    if (insert && _dpd.SnortStrcasestr((const char *)buf, bs, adata))
+    // special behavior for insert vs. rewrite
+    if (insert)
+    {
+        // we don't want to insert a string that is already present
+        if (!adata || _dpd.SnortStrcasestr((const char *)buf, bs, adata))
             return;
 
-    if (insert)
         start += psize;
+        bufcont = start;
+        as = strlen(adata);
+        maxs = bs+as;
+    }
+    else
+    {
+        if (adata)
+        {
+            // we also don't want to replace a string with an identical one.
+            if (!strncmp(buf+start,adata,psize))
+                return;
 
-    as = strlen(adata);
-    bufcont = insert ? start : start+psize;
-    maxs = insert ? bs+as : bs+(as-psize);
+            as = strlen(adata);
+        }
+        else
+            as = 0;
 
-    *outbuf = (char *)calloc(maxs+1,sizeof(char));
-    if (!*outbuf)
+        bufcont = start+psize;
+        maxs = bs+(as-psize);
+    }
+
+    *outbuf = copyPtr = (char *)calloc(maxs+1,sizeof(char));
+    if (!copyPtr)
         return;
 
-    for (bufoff = 0; bufoff < start; bufoff++)
-        *(*outbuf+bufoff) = *(buf+bufoff);
-    for (outoff = start, aoff = 0; aoff < as && outoff < maxs; outoff++, aoff++)
-        *(*outbuf+outoff) = *(adata+aoff);
-    for (bufoff = bufcont; bufoff < bs && outoff < maxs; bufoff++, outoff++)
-        *(*outbuf+outoff) = *(buf+bufoff);
+    memcpy(copyPtr, buf, start);
+    copyPtr += start;
+    if (adata)
+    {
+        memcpy(copyPtr, adata, as);
+        copyPtr += as;
+    }
+    memcpy(copyPtr, buf+bufcont, bs-bufcont);
 }
 
 static char * normalize_userid (char *user)
 {
-    int i, old_size, new_size;
+    int i, old_size;
     int percent_count = 0;
     char a, b;
     char *tmp_ret, *tmp_user;
@@ -860,7 +1072,6 @@ static char * normalize_userid (char *user)
     }
 
     /* Shrink user string in place */
-    new_size = old_size - percent_count*2;
     tmp_ret = user;
     tmp_user = user;
 
@@ -1269,52 +1480,81 @@ void finalizeFflow (fflow_info *fflow, unsigned app_type_flags, tAppId target_ap
     }
 
 }
-tAppId scanCHP (PatternType ptype, char *buf, int buf_size,
-                char **version, char **user, char **new_url, char **new_cookie,
-                int *total_found, httpSession *hsession, SFSnortPacket *p, const tDetectorHttpConfig *pHttpConfig)
+int scanKeyCHP (PatternType ptype, char *buf, int buf_size, CHPMatchTally **ppTally, MatchedCHPAction **ppmatches, const tDetectorHttpConfig *pHttpConfig)
 {
-    int longest_match = 0;
-    int second_sweep_for_inserts = 0;
-    MatchedCHPAction *mp = NULL;
-    MatchedCHPAction *tmp;
-    CHPAction *match = NULL;
-    CHPAction *longest = NULL;
-    tAppId ret = 0;
+    CHPTallyAndActions tallyAndActions;
+    tallyAndActions.pTally = *ppTally;
+    tallyAndActions.matches = *ppmatches;
 
     _dpd.searchAPI->search_instance_find_all(pHttpConfig->chp_matchers[ptype],
                (char *)buf,
                buf_size, 0,
-               &chp_pattern_match,
-               (void *)(&mp));
+               &chp_key_pattern_match,
+               (void *)(&tallyAndActions));
 
-    if (!mp) return 0;
+    *ppTally = tallyAndActions.pTally;
+    *ppmatches = tallyAndActions.matches;
+    return (int)(tallyAndActions.pTally != NULL);
+}
+
+tAppId scanCHP (PatternType ptype, char *buf, int buf_size, MatchedCHPAction *mp,
+                char **version, char **user, char **new_field,
+                int *total_found, httpSession *hsession, SFSnortPacket *p, const tDetectorHttpConfig *pHttpConfig)
+{
+    MatchedCHPAction *second_sweep_for_inserts = NULL;
+    int do_not_further_modify_field = 0;
+    CHPAction *match = NULL;
+    tAppId ret = APP_ID_NONE;
+    MatchedCHPAction *tmp;
+
+    if (ptype > MAX_KEY_PATTERN)
+    {
+        // There is no previous attempt to match generated by scanKeyCHP()
+        mp = NULL;
+
+        _dpd.searchAPI->search_instance_find_all(pHttpConfig->chp_matchers[ptype],
+                   (char *)buf,
+                   buf_size, 0,
+                   &chp_pattern_match,
+                   (void *)(&mp));
+    }
+    if (!mp)
+        return APP_ID_NONE;
+
+    if (appidStaticConfig.disable_safe_search)
+    {
+        new_field = NULL;
+    }
 
     for(tmp = mp; tmp; tmp = tmp->next)
     {
         match = (CHPAction *)tmp->mpattern;
-        if (hsession->chp_candidate)
+        if (match->appIdInstance > hsession->chp_candidate)
+            break; // because the list is sorted we know there are no more
+        else if (match->appIdInstance == hsession->chp_candidate)
         {
-            if (match->appId == hsession->chp_candidate)
+            switch (match->action)
             {
-                // ALTERNATE_APPID is an "optional" action that doesn't count towards totals
-                if (match->action != ALTERNATE_APPID)
+                case DEFER_TO_SIMPLE_DETECT:
+                    // Ignore all other patterns; we are done.
+                    FreeMatchedCHPActions(mp);
+                    // Returning APP_ID_NONE will trigger the clearing of hsession->skip_simple_detect
+                    // and the freeing of any planned field rewrites.
+                    return APP_ID_NONE;
+                default:
                     (*total_found)++;
-                if (!ret)
-                    ret = hsession->chp_candidate;
+                    break;
+                case ALTERNATE_APPID: // an "optional" action that doesn't count towards totals
+                case REWRITE_FIELD:   // handled when the action completes successfully
+                case INSERT_FIELD:    // handled when the action completes successfully
+                    break;
             }
-            else
-                continue;
+            if (!ret)
+                ret = hsession->chp_candidate;
         }
         else
-        {
-            if (!match->key_pattern)
-                continue;
-            if (match->psize > longest_match)
-            {
-                longest_match = match->psize;
-                longest = match;
-            }
-        }
+            continue; // keep looking
+
         switch (match->action)
         {
         case COLLECT_VERSION:
@@ -1333,14 +1573,16 @@ tAppId scanCHP (PatternType ptype, char *buf, int buf_size,
             }
             break;
         case REWRITE_FIELD:
-            if (appidStaticConfig.disable_safe_search)
-                break;
-            else if (ptype == URI_PT && !*new_url)
+            if (!do_not_further_modify_field &&
+                NULL != new_field &&
+                NULL == *new_field)
+            {
+                // The field supports rewrites, and a rewrite hasn't happened.
                 rewriteCHP(buf, buf_size, tmp->index, match->psize,
-                       match->action_data, new_url, 0);
-            else if (ptype == COOKIE_PT && !*new_cookie)
-                rewriteCHP(buf, buf_size, tmp->index, match->psize,
-                       match->action_data, new_cookie, 0);
+                       match->action_data, new_field, 0);
+                (*total_found)++;
+                do_not_further_modify_field = 1;
+            }
             break;
         case FUTURE_APPID_SESSION_SIP:
             if (appidStaticConfig.chp_fflow_disabled)
@@ -1426,7 +1668,27 @@ tAppId scanCHP (PatternType ptype, char *buf, int buf_size,
             fflowCreate(match->action_data, hsession->fflow, p, hsession->chp_candidate);
             break;
         case INSERT_FIELD:
-            second_sweep_for_inserts = 1;
+            if (!do_not_further_modify_field && second_sweep_for_inserts == NULL)
+            {
+                if (match->action_data)
+                {
+                    // because this insert is the first one we have come across
+                    // we only need to remember this ONE for later.
+                    second_sweep_for_inserts = tmp;
+                }
+                else
+                {
+                    // This is an attempt to "insert nothing"; call it a match
+                    // The side effect is to set the do_not_further_modify_field to 1 (true)
+
+                    // Note that an attempt to "rewrite with identical string"
+                    // is NOT equivalent to an "insert nothing" because of case-
+                    //  insensitive pattern matching
+
+                    do_not_further_modify_field = 1;
+                    (*total_found)++;
+                }
+            }
             break;
         case ALTERNATE_APPID:
             hsession->chp_alt_candidate = strtol(match->action_data, NULL, 10);
@@ -1437,36 +1699,29 @@ tAppId scanCHP (PatternType ptype, char *buf, int buf_size,
             break;
         case GET_OFFSETS_FROM_REBUILT:
             hsession->get_offsets_from_rebuilt = 1;
-            hsession->search_support_type = SUPPORTED_SEARCH_ENGINE;
             hsession->chp_hold_flow = 1;
             break;
         case SEARCH_UNSUPPORTED:
-            hsession->search_support_type = UNSUPPORTED_SEARCH_ENGINE;
-            break;
         case NO_ACTION:
             hsession->skip_simple_detect = true;
             break;
+        default:
+            break;
         }
     }
-    // run through the patterns again for insert actions
-    if (second_sweep_for_inserts)
+    // non-NULL second_sweep_for_inserts indicates the insert action we will use.
+    if (!do_not_further_modify_field && second_sweep_for_inserts &&
+        NULL != new_field &&
+        NULL == *new_field)
     {
-        for(tmp = mp; tmp; tmp = tmp->next)
-        {
-            match = (CHPAction *)tmp->mpattern;
-            if (match->action == INSERT_FIELD)
-            {
-                if (ptype == URI_PT && !*new_url)
-                    rewriteCHP(buf, buf_size, tmp->index, match->psize,
-                           match->action_data, new_url, 1);
-                else if (ptype == COOKIE_PT && !*new_cookie)
-                    rewriteCHP(buf, buf_size, tmp->index, match->psize,
-                           match->action_data, new_cookie, 1);
-            }
-        }
+        // We will take the first INSERT_FIELD with an action string,
+        // which was decided with the setting of second_sweep_for_inserts.
+        rewriteCHP(buf, buf_size, second_sweep_for_inserts->index,
+                second_sweep_for_inserts->mpattern->psize,
+                second_sweep_for_inserts->mpattern->action_data,
+                new_field, 1); // insert
+        (*total_found)++;
     }
-    // for initial scane, take the longest match
-    if (!hsession->chp_candidate && longest) ret = longest->appId;
 
     FreeMatchedCHPActions(mp);
     return ret;
@@ -2314,3 +2569,131 @@ int webdav_found(HeaderMatchedPatterns *hmp)
         found = 1;
     return found;
 }
+
+// Start of HTTP/2 detection logic.
+//
+// This is intended to simply detect the presence of HTTP version 2 as a
+// service protocol if it is seen (unencrypted) on non-std ports.  That way, we
+// can notify Snort for future reference.  this covers the "with prior
+// knowledge" case for HTTP/2 (i.e., the client knows the server supports
+// HTTP/2 and jumps right in with the preface).
+
+static CLIENT_APP_RETCODE http_client_init(const InitClientAppAPI * const init_api, SF_LIST *config);
+static CLIENT_APP_RETCODE http_client_validate(const uint8_t *data, uint16_t size, const int dir,
+                                               tAppIdData *flowp, SFSnortPacket *pkt, struct _Detector *userData,
+                                               const tAppIdConfig *pConfig);
+
+static int http_service_init(const InitServiceAPI * const init_api);
+static int http_service_validate(ServiceValidationArgs* args);
+
+static tAppRegistryEntry appIdRegistry[] =
+{
+    {APP_ID_HTTP, 0}
+};
+
+static const char HTTP2_PREFACE[] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+#define HTTP2_PREFACE_LEN (sizeof(HTTP2_PREFACE)-1)
+#define HTTP2_PREFACE_MAXPOS (sizeof(HTTP2_PREFACE)-2)
+
+typedef struct {
+    const u_int8_t *pattern;
+    unsigned length;
+    int index;
+    unsigned appId;
+} Client_App_Pattern;
+
+static Client_App_Pattern patterns[] =
+{
+    {(const uint8_t *)HTTP2_PREFACE, sizeof(HTTP2_PREFACE)-1, 0, APP_ID_HTTP},
+};
+
+SF_SO_PUBLIC tRNAClientAppModule http_client_mod =
+{
+    .name = "HTTP",
+    .proto = IPPROTO_TCP,
+    .init = &http_client_init,
+    .validate = &http_client_validate,
+    .minimum_matches = 1
+};
+
+static RNAServiceValidationPort pp[] =
+{
+    {NULL, 0, 0}
+};
+
+static tRNAServiceElement http_service_element =
+{
+    .next = NULL,
+    .validate = &http_service_validate,
+    .detectorType = DETECTOR_TYPE_DECODER,
+    .name = "http",
+    .ref_count = 1,
+    .current_ref_count = 1,
+};
+
+tRNAServiceValidationModule http_service_mod =
+{
+    "HTTP",
+    &http_service_init,
+    pp
+};
+
+static CLIENT_APP_RETCODE http_client_init(const InitClientAppAPI * const init_api, SF_LIST *config)
+{
+    unsigned i;
+
+    if (appidStaticConfig.http2_detection_enabled)
+    {
+        for (i=0; i < sizeof(patterns)/sizeof(*patterns); i++)
+        {
+            _dpd.debugMsg(DEBUG_LOG, "registering patterns: %s: %d",
+                          (const char *)patterns[i].pattern, patterns[i].index);
+            init_api->RegisterPattern(&http_client_validate, IPPROTO_TCP, patterns[i].pattern, patterns[i].length, patterns[i].index, init_api->pAppidConfig);
+        }
+    }
+
+
+    unsigned j;
+    for (j=0; j < sizeof(appIdRegistry)/sizeof(*appIdRegistry); j++)
+    {
+        _dpd.debugMsg(DEBUG_LOG, "registering appId: %d\n", appIdRegistry[j].appId);
+        init_api->RegisterAppId(&http_client_validate, appIdRegistry[j].appId, appIdRegistry[j].additionalInfo, init_api->pAppidConfig);
+    }
+
+    return CLIENT_APP_SUCCESS;
+}
+
+static CLIENT_APP_RETCODE http_client_validate(const uint8_t *data, uint16_t size, const int dir,
+                                               tAppIdData *flowp, SFSnortPacket *pkt, struct _Detector *userData,
+                                               const tAppIdConfig *pConfig)
+{
+    http_client_mod.api->add_app(flowp, APP_ID_HTTP, APP_ID_HTTP + GENERIC_APP_OFFSET, NULL);
+    flowp->rnaClientState = RNA_STATE_FINISHED;
+    http_service_mod.api->add_service(flowp, pkt, dir, &http_service_element,
+                                      APP_ID_HTTP, NULL, NULL, NULL);
+    flowp->rnaServiceState = RNA_STATE_FINISHED;
+    setAppIdFlag(flowp, APPID_SESSION_CLIENT_DETECTED | APPID_SESSION_SERVICE_DETECTED);
+    clearAppIdFlag(flowp, APPID_SESSION_CONTINUE);
+    flowp->is_http2 = true;
+
+    return CLIENT_APP_SUCCESS;
+}
+
+static int http_service_init(const InitServiceAPI * const init_api)
+{
+    unsigned i;
+    for (i=0; i < sizeof(appIdRegistry)/sizeof(*appIdRegistry); i++)
+    {
+        _dpd.debugMsg(DEBUG_LOG, "registering appId: %d\n", appIdRegistry[i].appId);
+        init_api->RegisterAppId(&http_service_validate, appIdRegistry[i].appId, appIdRegistry[i].additionalInfo, init_api->pAppidConfig);
+    }
+
+    return 0;
+}
+
+static int http_service_validate(ServiceValidationArgs* args)
+{
+    return SERVICE_INPROCESS;
+}
+
+// End of HTTP/2 detection logic.

@@ -1,7 +1,7 @@
 /* $Id$ */
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -58,6 +58,11 @@ uint8_t s5_paf_register_service(
     bool autoEnable
 );
 
+void s5_paf_register_free(
+    uint8_t id, 
+    PAF_Free_Callback
+);
+
 // flush indicates s5 port config
 uint16_t s5_paf_port_registration (void* pv, uint16_t port, bool c2s, bool flush);
 uint16_t s5_paf_port_registration_all (void* pv, uint16_t port, bool c2s, bool flush);
@@ -83,6 +88,7 @@ typedef struct {
     uint8_t mode;
     uint16_t cb_mask; // callback mask
     uint8_t cb_id[MAX_PAF_USER];
+    uint32_t fpt_eoh; //Flush point at EOH
 } PAF_State;         // per session direction
 
 // called at session start
@@ -108,7 +114,7 @@ static inline uint32_t s5_paf_active (PAF_State* ps)
 uint32_t s5_paf_check(
     void* paf_config, PAF_State*, void* ssn,
     const uint8_t* data, uint32_t len, uint32_t total,
-    uint32_t seq, uint16_t port, uint32_t* flags, uint32_t fuzz);
+    uint32_t seq, uint16_t port, uint64_t* flags, uint32_t fuzz);
 
 int8_t s5_paf_get_user_data_index( PAF_State *ps, uint8_t id);
 #endif

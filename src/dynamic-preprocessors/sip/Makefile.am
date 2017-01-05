@@ -34,8 +34,15 @@ sip_debug.h \
 sip_paf.c \
 sip_paf.h
 
+if BUILD_BUFFER_DUMP
+libsf_sip_preproc_la_SOURCES += \
+sip_buffer_dump.c \
+sip_buffer_dump.h
+endif
+
 EXTRA_DIST = \
 sf_sip.dsp
+
 
 all-local: $(LTLIBRARIES)
 	$(MAKE) DESTDIR=`pwd`/../build install-dynamicpreprocessorLTLIBRARIES

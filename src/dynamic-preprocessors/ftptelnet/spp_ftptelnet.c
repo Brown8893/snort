@@ -1,7 +1,7 @@
 /*
  * spp_ftptelnet.c
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2004-2013 Sourcefire, Inc.
  * Steven A. Sturges <ssturges@sourcefire.com>
  * Daniel J. Roelker <droelker@sourcefire.com>
@@ -62,6 +62,10 @@
 
 #include "sfPolicy.h"
 #include "sfPolicyUserData.h"
+
+#ifdef DUMP_BUFFER
+#include "ftptelnet_buffer_dump.h"
+#endif
 
 const int MAJOR_VERSION = 1;
 const int MINOR_VERSION = 2;
@@ -452,6 +456,9 @@ void SetupFTPTelnet(void)
 
     DEBUG_WRAP(DebugMessage(DEBUG_FTPTELNET, "Preprocessor: FTPTelnet is "
                 "setup . . .\n"););
+#ifdef DUMP_BUFFER
+    _dpd.registerBufferTracer(getFTPTelnetBuffers, FTPTELNET_BUFFER_DUMP_FUNC);
+#endif
 }
 
 static void FTPTelnetReset(int signal, void *data)

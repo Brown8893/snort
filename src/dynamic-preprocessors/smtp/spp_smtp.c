@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -76,6 +76,10 @@ int smtpDetectCalled = 0;
 #include "snort_bounds.h"
 
 #include "file_api.h"
+
+#ifdef DUMP_BUFFER
+#include "smtp_buffer_dump.h"
+#endif
 
 const int MAJOR_VERSION = 1;
 const int MINOR_VERSION = 1;
@@ -256,6 +260,9 @@ static void SMTPInit(struct _SnortConfig *sc, char *args)
 
 #ifdef TARGET_BASED
     _addServicesToStreamFilter(sc, policy_id);
+#endif
+#ifdef DUMP_BUFFER
+    _dpd.registerBufferTracer(getSMTPBuffers, SMTP_BUFFER_DUMP_FUNC);
 #endif
 }
 
@@ -710,3 +717,4 @@ static void SMTPReloadSwapFree(void *data)
     SMTP_FreeConfigs((tSfPolicyUserContextId)data);
 }
 #endif
+

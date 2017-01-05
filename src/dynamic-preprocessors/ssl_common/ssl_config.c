@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2007-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -730,6 +730,7 @@ void SSLPP_init(struct _SnortConfig *sc, char *args)
 #ifdef TARGET_BASED
     _addServicesToStream5Filter(sc, policy_id);
 #endif
+
 }
 
 static int SSLFreeConfigPolicy(

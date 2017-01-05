@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+** Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2005-2013 Sourcefire, Inc.
 **
 ** This program is free software; you can redistribute it and/or modify
@@ -244,7 +244,7 @@ int ssl_detector_process_patterns(tServiceSslConfig *pSslConfig)
 }
 
 static int ssl_init(const InitServiceAPI * const api);
-MakeRNAServiceValidationPrototype(ssl_validate);
+static int ssl_validate(ServiceValidationArgs* args);
 
 static tRNAServiceElement svc_element =
 {
@@ -609,7 +609,7 @@ parse_certificates_clean:
     return success;    /* 1 is OK; 0 is fail. */
 }
 
-MakeRNAServiceValidationPrototype(ssl_validate)
+static int ssl_validate(ServiceValidationArgs* args)
 {
     ServiceSSLData *ss;
     const ServiceSSLPCTHdr *pct;
@@ -618,6 +618,10 @@ MakeRNAServiceValidationPrototype(ssl_validate)
     const ServiceSSLV3Record *rec;
     const ServiceSSLV3CertsRecord *certs_rec;
     uint16_t ver;
+    tAppIdData *flowp = args->flowp;
+    const uint8_t *data = args->data;
+    const int dir = args->dir;
+    uint16_t size = args->size;
 
     if (!size)
         goto inprocess;
@@ -847,7 +851,7 @@ not_v2:;
     }
 
 inprocess:
-    ssl_service_mod.api->service_inprocess(flowp, pkt, dir, &svc_element);
+    ssl_service_mod.api->service_inprocess(flowp, args->pkt, dir, &svc_element);
     return SERVICE_INPROCESS;
 
 fail:
@@ -857,7 +861,8 @@ fail:
     free(ss->org_name);
     ss->certs_data = NULL;
     ss->host_name = ss->common_name = ss->org_name = NULL;
-    ssl_service_mod.api->fail_service(flowp, pkt, dir, &svc_element, ssl_service_mod.flow_data_index, pConfig);
+    ssl_service_mod.api->fail_service(flowp, args->pkt, dir, &svc_element,
+                                      ssl_service_mod.flow_data_index, args->pConfig);
     return SERVICE_NOMATCH;
 
 success:
@@ -868,7 +873,7 @@ success:
             goto fail;
         }
     }
-    setAppIdExtFlag(flowp, APPID_SESSION_SSL_SESSION);
+    setAppIdFlag(flowp, APPID_SESSION_SSL_SESSION);
     if (ss->host_name || ss->common_name || ss->org_name)
     {
         if (!flowp->tsession)
@@ -921,8 +926,8 @@ success:
 
         ss->host_name = ss->common_name = ss->org_name = NULL;
     }
-    ssl_service_mod.api->add_service(flowp, pkt, dir, &svc_element,
-                                     getSslServiceAppId(pkt->src_port), NULL, NULL, NULL);
+    ssl_service_mod.api->add_service(flowp, args->pkt, dir, &svc_element,
+                                     getSslServiceAppId(args->pkt->src_port), NULL, NULL, NULL);
     return SERVICE_SUCCESS;
 }
 

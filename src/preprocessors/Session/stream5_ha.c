@@ -1,7 +1,7 @@
 /* $Id$ */
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2012-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -1092,6 +1092,15 @@ static int ConsumeHAMessage(const uint8_t *msg, uint32_t msglen)
                                 (lwssn) ? "Updating" : "Creating", s5_ha_debug_session, has->ha_state.session_flags,
                                 has->ha_state.direction, has->ha_state.ignore_direction);
 #endif
+                }
+                if(!scb)
+                {
+                    if (has->ha_state.session_flags & SSNFLAG_COUNTED_CLOSING)
+                        sfBase.iSessionsClosing++;
+                    else if (has->ha_state.session_flags & SSNFLAG_COUNTED_ESTABLISH)
+                        sfBase.iSessionsEstablished++;
+                    else if (has->ha_state.session_flags & SSNFLAG_COUNTED_INITIALIZE)
+                        sfBase.iSessionsInitializing++;
                 }
                 scb = DeserializeHASession(&key, has, scb);
                 scb->session_established = true;

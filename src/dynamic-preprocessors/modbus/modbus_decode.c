@@ -14,7 +14,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * Author: Ryan Jordan
@@ -71,6 +71,9 @@
 #define MODBUS_SUB_FUNC_READ_DEVICE_START_LEN           2
 #define MODBUS_SUB_FUNC_READ_DEVICE_LENGTH_OFFSET       1
 
+#ifdef DUMP_BUFFER
+#include "modbus_buffer_dump.h"
+#endif
 
 /* Other defines */
 #define MODBUS_PROTOCOL_ID 0
@@ -406,6 +409,9 @@ static void ModbusCheckReservedFuncs(modbus_header_t *header, SFSnortPacket *pac
                           MODBUS_RESERVED_FUNCTION_STR, 0);
             break;
     }
+#ifdef DUMP_BUFFER
+        dumpBuffer(MODBUS_RESERVED_FUN_DUMP,packet->payload,packet->payload_size);
+#endif
 }
 
 int ModbusDecode(modbus_config_t *config, SFSnortPacket *packet)
@@ -442,9 +448,18 @@ int ModbusDecode(modbus_config_t *config, SFSnortPacket *packet)
     /* Read the Modbus payload and check lengths against the expected length for
        each function. */
     if (packet->flags & FLAG_FROM_CLIENT)
+    {
         ModbusCheckRequestLengths(session, packet);
+#ifdef DUMP_BUFFER
+        dumpBuffer(MODBUS_CLINET_REQUEST_DUMP,packet->payload,packet->payload_size);
+#endif
+    }
     else
+    {
         ModbusCheckResponseLengths(session, packet);
-    
+#ifdef DUMP_BUFFER
+        dumpBuffer(MODBUS_SERVER_RESPONSE_DUMP,packet->payload,packet->payload_size);
+#endif
+    }
     return MODBUS_OK;
 }

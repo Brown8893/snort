@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -254,12 +254,13 @@ static inline bool find_body(const uint8_t ch, SIPPafData *pfdata)
  *    uint32_t len - length of payload data
  *    uint32_t flags - flags to check whether client or server
  *    uint32_t * fp - pointer to set flush point
+ *    uint32_t * fp_eoh - pointer to set header flush point
  *
  * Returns:
  *   PAF_Status - PAF_FLUSH if flush point found, PAF_SEARCH otherwise
  */
 static PAF_Status sip_paf(void* ssn, void** ps, const uint8_t* data,
-        uint32_t len, uint32_t flags, uint32_t* fp)
+        uint32_t len, uint64_t *flags, uint32_t* fp, uint32_t* fp_eoh)
 {
     uint32_t i;
     SIPPafData *pfdata = *(SIPPafData **)ps;

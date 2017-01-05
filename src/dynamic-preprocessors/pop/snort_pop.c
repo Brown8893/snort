@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2011-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -70,6 +70,10 @@
 #include "sf_types.h"
 #endif
 #include "pop_paf.h"
+
+#ifdef DUMP_BUFFER
+#include "pop_buffer_dump.h"
+#endif
 
 /**************************************************************************/
 
@@ -629,6 +633,9 @@ static const uint8_t * POP_HandleCommand(SFSnortPacket *p, const uint8_t *ptr, c
         const uint8_t *cmd_start = ptr + pop_search_info.index;
         const uint8_t *cmd_end = cmd_start + pop_search_info.length;
 
+#ifdef DUMP_BUFFER
+     dumpBuffer(POP_REQUEST_COMMAND_DUMP,ptr,(cmd_end-cmd_start));
+#endif
         /* move past spaces up until start of command */
         while ((tmp < cmd_start) && isspace((int)*tmp))
             tmp++;
@@ -650,6 +657,9 @@ static const uint8_t * POP_HandleCommand(SFSnortPacket *p, const uint8_t *ptr, c
     /* if command not found, alert and move on */
     if (!cmd_found)
     {
+#ifdef DUMP_BUFFER
+     dumpBuffer(POP_REQUEST_COMMAND_DUMP,ptr,(eolm-ptr));
+#endif
         if (pop_ssn->state == STATE_UNKNOWN)
         {
             DEBUG_WRAP(DebugMessage(DEBUG_POP, "Command not found, but state is "
@@ -734,6 +744,11 @@ static void POP_ProcessClientPacket(SFSnortPacket *p)
     const uint8_t *ptr = p->payload;
     const uint8_t *end = p->payload + p->payload_size;
 
+#ifdef DUMP_BUFFER
+    dumpBuffer(POP_REQUEST_PAYLOAD_DUMP,p->payload,p->payload_size);
+#endif
+
+
     ptr = POP_HandleCommand(p, ptr, end);
 
 
@@ -758,6 +773,10 @@ static void POP_ProcessServerPacket(SFSnortPacket *p)
     ptr = p->payload;
     end = p->payload + p->payload_size;
 
+#ifdef DUMP_BUFFER
+    dumpBuffer(POP_RESPONSE_PAYLOAD_DUMP,p->payload,p->payload_size);
+#endif
+
     while (ptr < end)
     {
         if(pop_ssn->state == STATE_DATA)
@@ -777,9 +796,14 @@ static void POP_ProcessServerPacket(SFSnortPacket *p)
             (pop_resp_search_mpse, (const char *)ptr,
              resp_line_len, 1, POP_SearchStrFound);
 
+
         if (resp_found > 0)
         {
             const uint8_t *cmd_start = ptr + pop_search_info.index;
+
+#ifdef DUMP_BUFFER
+    dumpBuffer(POP_RESPONSE_STATUS_DUMP,ptr,(eolm-ptr));
+#endif
             switch (pop_search_info.id)
             {
                 case RESP_OK:
@@ -800,6 +824,9 @@ static void POP_ProcessServerPacket(SFSnortPacket *p)
         }
         else
         {
+#ifdef DUMP_BUFFER
+    dumpBuffer(POP_RESPONSE_STATUS_DUMP,ptr, (eolm-ptr));
+#endif
             DEBUG_WRAP(DebugMessage(DEBUG_POP, "Server response not found - see if it's SSL data\n"););
 
             if ((pop_ssn->session_flags & POP_FLAG_CHECK_SSL) &&
@@ -921,7 +948,9 @@ void SnortPOP(SFSnortPacket *p)
     ssl_callback_interface_t *ssl_cb = (ssl_callback_interface_t *)_dpd.getSSLCallback();
 
     PROFILE_VARS;
-
+#ifdef DUMP_BUFFER
+    dumpBufferInit();
+#endif
 
     pop_ssn = (POP *)_dpd.sessionAPI->get_application_data(p->stream_session, PP_POP);
     if (pop_ssn != NULL)
@@ -949,6 +978,9 @@ void SnortPOP(SFSnortPacket *p)
         /* This packet should be a tls client hello */
         if (pop_ssn->state == STATE_TLS_CLIENT_PEND)
         {
+#ifdef DUMP_BUFFER
+    dumpBuffer(POP_STATE_TLS_CLIENT_PEND_DUMP,p->payload,p->payload_size);
+#endif
             if (IsTlsClientHello(p->payload, p->payload + p->payload_size))
             {
                 DEBUG_WRAP(DebugMessage(DEBUG_POP,
@@ -968,6 +1000,9 @@ void SnortPOP(SFSnortPacket *p)
         if ((pop_ssn->state == STATE_TLS_DATA)
                 || (pop_ssn->state == STATE_TLS_SERVER_PEND))
         {
+#ifdef DUMP_BUFFER
+    dumpBuffer(POP_STATE_TLS_DATA_DUMP,p->payload,p->payload_size);
+#endif
             if( _dpd.streamAPI->is_session_decrypted(p->stream_session))
             {
                 pop_ssn->state = STATE_COMMAND;
@@ -995,6 +1030,9 @@ void SnortPOP(SFSnortPacket *p)
 #endif
         if (pop_ssn->state == STATE_TLS_SERVER_PEND)
         {
+#ifdef DUMP_BUFFER
+    dumpBuffer(POP_STATE_TLS_SERVER_PEND_DUMP,p->payload,p->payload_size);
+#endif
             if( _dpd.streamAPI->is_session_decrypted(p->stream_session))
             {
                 pop_ssn->state = STATE_COMMAND;
@@ -1015,6 +1053,9 @@ void SnortPOP(SFSnortPacket *p)
 
         if (pop_ssn->state == STATE_TLS_DATA)
         {
+#ifdef DUMP_BUFFER
+    dumpBuffer(POP_STATE_TLS_DATA_DUMP,p->payload,p->payload_size);
+#endif
             if( _dpd.streamAPI->is_session_decrypted(p->stream_session))
             {
                 pop_ssn->state = STATE_COMMAND;

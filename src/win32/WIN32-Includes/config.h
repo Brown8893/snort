@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -101,15 +101,15 @@
  * should both match the ones specified in the
  * AM_INIT_AUTOMAKE() macro of configure.in
  */
-#define VERSION "2.9.8.3"VERSION_ENABLE_RESPONSE"-WIN32"VERSION_DEBUG
+#define VERSION "2.9.9.0"VERSION_ENABLE_RESPONSE"-WIN32"VERSION_DEBUG
 #define PACKAGE "snort"
 
 #define IFNAMSIZ   255
 
 #undef _WIN32_WINNT
-#define _WIN32_WINNT _WIN32_WINNT_WIN2K
+#define _WIN32_WINNT 0x0502
 #undef NTDDI_VERSION
-#define NTDDI_VERSION NTDDI_WIN2K
+#define NTDDI_VERSION 0x05020000
 
 /* Abuse header guards to prevent winscard.h from being included.
    This was needed to prevent conflict with sqlfront.h */

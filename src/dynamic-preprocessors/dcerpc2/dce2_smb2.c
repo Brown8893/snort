@@ -1,5 +1,5 @@
 /****************************************************************************
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2008-2013 Sourcefire, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -35,6 +35,11 @@
 #include "snort_dce2.h"
 #include "dce2_event.h"
 #include "dce2_list.h"
+
+#ifdef DUMP_BUFFER
+#include "dcerpc2_buffer_dump.h"
+#endif
+
 
 #define   UNKNOWN_FILE_SIZE                  ~0
 
@@ -811,6 +816,10 @@ void DCE2_Smb2Process(DCE2_SmbSsnData *ssd)
     uint16_t data_len = p->payload_size;
     Smb2Hdr *smb_hdr;
     const uint8_t *end = data_ptr +  data_len;
+
+#ifdef DUMP_BUFFER
+    dumpBuffer(DCERPC_SMB2_DUMP,data_ptr,data_len);
+#endif
 
     /*Check header length*/
     if (data_len < sizeof(NbssHdr) + SMB2_HEADER_LENGTH)

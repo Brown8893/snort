@@ -14,7 +14,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2005-2013 Sourcefire, Inc.
  *
  * Author: Steven Sturges
@@ -120,12 +120,16 @@ typedef void (*PreprocStatsNodeFreeFunc)(struct _PreprocStats *stats);
 typedef void (*AddPreprocProfileFunc)(const char *, void *, int, void *, PreprocStatsNodeFreeFunc freefn);
 typedef int (*ProfilingFunc)(void);
 typedef int (*PreprocessFunc)(void *);
+#ifdef DUMP_BUFFER
+typedef void (*BufferDumpRegisterFunc)(TraceBuffer * (*)(), unsigned int);
+#endif
 typedef void (*PreprocStatsRegisterFunc)(const char *, void (*pp_stats_func)(int));
 typedef void (*AddPreprocReset)(void (*pp_rst_func) (int, void *), void *arg, uint16_t, uint32_t);
 typedef void (*AddPreprocResetStats)(void (*pp_rst_stats_func) (int, void *), void *arg, uint16_t, uint32_t);
 typedef void (*AddPreprocReassemblyPktFunc)(void * (*pp_reass_pkt_func)(void), uint32_t);
 typedef int (*SetPreprocReassemblyPktBitFunc)(void *, uint32_t);
 typedef void (*DisablePreprocessorsFunc)(void *);
+typedef char** (*DynamicGetHttpXffFieldsFunc)(int* nFields);
 #ifdef TARGET_BASED
 typedef int16_t (*FindProtocolReferenceFunc)(const char *);
 typedef int16_t (*AddProtocolReferenceFunc)(const char *);
@@ -359,7 +363,9 @@ typedef struct _DynamicPreprocessorData
 #endif
 
     PreprocessFunc preprocess;
-
+#ifdef DUMP_BUFFER
+    BufferDumpRegisterFunc registerBufferTracer;
+#endif
     char **debugMsgFile;
     int *debugMsgLine;
 
@@ -517,6 +523,9 @@ typedef struct _DynamicPreprocessorData
     OpenDynamicLibraryFunc openDynamicLibrary;
     GetSymbolFunc getSymbol;
     CloseDynamicLibraryFunc closeDynamicLibrary;
+
+    DynamicGetHttpXffFieldsFunc getHttpXffFields;
+
 #if defined(FEAT_OPEN_APPID)
     struct AppIdApi *appIdApi;
     RegisterIsAppIdRequiredFunc registerIsAppIdRequired;

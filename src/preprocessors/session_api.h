@@ -1,7 +1,7 @@
 /* $Id$ */
 
 /*
- * Copyright (C) 2014-2015 Cisco and/or its affiliates. All rights reserved.
+ * Copyright (C) 2014-2016 Cisco and/or its affiliates. All rights reserved.
  * Copyright (C) 2004-2013 Sourcefire, Inc.
  * ** AUTHOR: d mcpherson
  * **
@@ -66,6 +66,8 @@
 #define STREAM_MAX_CACHE_TIMEOUT                    ( 12 * 60 * 60 )  /*  12 hours */
 #define STREAM_MIN_PRUNE_LOG_MAX     1024      /* 1k packet data stored */
 #define STREAM_MAX_PRUNE_LOG_MAX     STREAM_RIDICULOUS_HI_MEMCAP  /* 1GB packet data stored */
+#define STREAM_DELAY_SESSION_DELETION true   /* set if session deletion to be delayed */
+#define STREAM_DELAY_TIMEOUT_AFTER_CONNECTION_ENDED   (3 * 60)    /*  3 minutes */
 
 #define STREAM_EXPECTED_CHANNEL_TIMEOUT 300
 
@@ -123,6 +125,9 @@
 #define SSNFLAG_CLIENT_SWAP         0x01000000
 #define SSNFLAG_CLIENT_SWAPPED      0x02000000
 #define SSNFLAG_DETECTION_DISABLED  0x04000000
+#define SSNFLAG_HTTP_2              0x08000000
+#define SSNFLAG_HTTP_2_UPG          0x10000000
+#define SSNFLAG_FREE_APP_DATA       0x20000000
 #define SSNFLAG_ALL                 0xFFFFFFFF /* all that and a bag of chips */
 #define SSNFLAG_NONE                0x00000000 /* nothing, an MT bag of chips */
 
@@ -138,6 +143,13 @@
 #define TCP_HZ          100
 
 #define SESSION_API_VERSION1 1
+
+/* NOTE:  The XFF_BUILTING_NAMES value must match the code in snort_httpinspect.c that
+          adds the builtin names to the list. */
+#define HTTP_XFF_FIELD_X_FORWARDED_FOR  "X-Forwarded-For"
+#define HTTP_XFF_FIELD_TRUE_CLIENT_IP   "True-Client-IP"
+#define HTTP_XFF_BUILTIN_NAMES          (2)
+#define HTTP_MAX_XFF_FIELDS             8
 
 typedef struct _StreamSessionKey
 {
@@ -225,6 +237,7 @@ struct _ExpectNode;
 typedef void( *SessionCleanup )( void *ssn );
 typedef void ( *nap_selector )( Packet *p, bool client_packet );
 typedef void (*MandatoryEarlySessionCreatorFn)(void *ssn, struct _ExpectNode*);
+typedef char** (*GetHttpXffPrecedenceFunc)(void* ssn, uint32_t flags, int* nFields);
 
 typedef struct _session_api
 {
@@ -607,6 +620,25 @@ typedef struct _session_api
 
     StreamFlowData *(*get_flow_data)(Packet *p);
 
+     /* Set if Session Deletion to be delayed
+      *
+      * Parameters
+      *   Session Ptr
+      *   bool to set/unset delay_session_deletion_flag
+      *
+      */
+     void (*set_session_deletion_delayed)(void *, bool);
+
+     /* Returns if SessionDeletion to be delayed or not
+      *
+      * Parameters
+      *    Session Ptr
+      *
+      * Returns
+      *    bool value denoting if sessionDeletion Delayed or not
+      *
+      */
+     bool (*is_session_deletion_delayed)(void *);
 
 #ifdef TARGET_BASED
     /*  Register preproc handler for the specifed application id
@@ -835,6 +867,8 @@ typedef struct _session_api
                                                      MandatoryEarlySessionCreatorFn callback);
     void* (*get_application_data_from_expected_node)(struct _ExpectNode*, uint32_t);
     int (*add_application_data_to_expected_node)(struct _ExpectNode*, uint32_t, void*, void (*)(void*));
+    void (*register_get_http_xff_precedence)(GetHttpXffPrecedenceFunc );
+    char** (*get_http_xff_precedence)(void* ssn, uint32_t flags, int* nFields);
     struct _ExpectNode* (*get_next_expected_node)(struct _ExpectNode*);
 } SessionAPI;
 
